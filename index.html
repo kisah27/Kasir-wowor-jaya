@@ -63,8 +63,11 @@
                             <button onclick="tutupScannerAdmin()" class="w-full mt-2 bg-red-500 text-white py-1 rounded text-sm">Tutup Kamera</button>
                         </div>
 
-                        <input type="text" id="inputBarcode" placeholder="Hasil scan / Ketik Barcode" class="w-full border p-2 rounded mb-2">
-                        <input type="text" id="inputNama" placeholder="Nama Barang" class="w-full border p-2 rounded mb-2">
+                        <input type="text" id="inputBarcode" placeholder="Hasil scan / Ketik Barcode" class="w-full border p-2 rounded mb-1">
+                        <div id="statusNamaOtomatis" class="text-xs mb-2 hidden"></div>
+                        <button onclick="klikCariNama()" class="w-full bg-indigo-500 text-white py-1.5 rounded text-sm font-semibold mb-2 hover:bg-indigo-600">🔍 Cari Nama Produk Otomatis</button>
+
+                        <input type="text" id="inputNama" placeholder="Nama Barang (otomatis / manual)" class="w-full border p-2 rounded mb-2">
                         <input type="text" id="inputHarga" inputmode="numeric" placeholder="Harga (misal: 5000)" class="w-full border p-2 rounded mb-2">
                         <input type="number" id="inputStok" min="0" placeholder="Stok (kosongkan = tak terbatas)" class="w-full border p-2 rounded mb-2">
                         <button id="btnSimpanBarang" onclick="simpanBarang()" class="w-full bg-green-500 text-white py-2 rounded-lg font-bold disabled:opacity-50">SIMPAN BARANG</button>
@@ -140,6 +143,26 @@
                 <button id="btnKonfirmasiBayar" onclick="konfirmasiBayar()" class="w-full bg-green-500 text-white py-3 rounded-lg font-bold text-lg hover:bg-green-600 disabled:opacity-50 disabled:cursor-not-allowed">✓ Konfirmasi & Cetak Struk</button>
             </div>
         </div>
+
+        <!-- MODAL TAMBAH CEPAT (barang belum ada di database) -->
+        <div id="modalQuickAdd" class="hidden absolute inset-0 bg-black/60 z-[60] flex items-center justify-center p-4">
+            <div class="bg-white rounded-2xl w-full max-w-sm p-5">
+                <div class="flex justify-between items-center mb-2">
+                    <h3 class="text-lg font-bold text-gray-800">Tambah Barang Baru</h3>
+                    <button onclick="tutupQuickAdd()" class="text-gray-400 hover:text-gray-600 text-2xl font-bold leading-none">&times;</button>
+                </div>
+                <p class="text-xs text-gray-400 mb-3">Barcode: <span id="qaBarcode" class="font-mono font-semibold text-gray-600"></span></p>
+                <div id="qaStatus" class="text-xs mb-2 hidden"></div>
+                <label class="text-sm text-gray-500">Nama Barang</label>
+                <input type="text" id="qaNama" placeholder="Nama produk..." class="w-full border p-2 rounded mb-2">
+                <label class="text-sm text-gray-500">Harga Jual <span class="text-red-500">*</span></label>
+                <input type="text" id="qaHarga" inputmode="numeric" placeholder="misal: 5000" class="w-full border p-2 rounded mb-2">
+                <label class="text-sm text-gray-500">Stok (opsional)</label>
+                <input type="number" id="qaStok" min="0" placeholder="kosongkan = tak terbatas" class="w-full border p-2 rounded mb-3">
+                <button onclick="simpanQuickAdd()" class="w-full bg-green-500 text-white py-2.5 rounded-lg font-bold hover:bg-green-600">💾 Simpan & Masukkan Keranjang</button>
+                <button onclick="tutupQuickAdd()" class="w-full mt-2 text-gray-500 py-2 text-sm hover:bg-gray-100 rounded-lg">Batal</button>
+            </div>
+        </div>
     </div>
 
     <!-- KONEKSI FIREBASE -->
@@ -165,7 +188,6 @@
         const db = getFirestore(app);
         const auth = getAuth(app);
 
-        // Ekspos ke script non-module
         window.db = db;
         window.fs = { doc, getDoc, setDoc, getDocs, collection, deleteDoc, updateDoc, query, orderBy, limit };
 
@@ -187,6 +209,7 @@
         let scannerKasir = null;
         let scannerAdmin = null;
         let editBarcode = null;
+        let quickAddBarcode = null;
         let cacheBarang = [];
         let cacheTransaksi = [];
         let lastScan = { text: '', time: 0 };
@@ -221,6 +244,14 @@
             }, 2500);
         }
 
+        function setStatusEl(id, pesan, tipe) {
+            const el = document.getElementById(id);
+            if (!pesan) { el.classList.add('hidden'); return; }
+            el.textContent = pesan;
+            el.className = 'text-xs mb-2 font-medium ' +
+                (tipe === 'error' ? 'text-red-600' : tipe === 'load' ? 'text-gray-500' : 'text-green-600');
+        }
+
         function beep(freq = 1100, durasi = 80, tipe = 'square', volume = 0.08) {
             try {
                 audioCtx = audioCtx || new (window.AudioContext || window.webkitAudioContext)();
@@ -244,9 +275,48 @@
         setInterval(updateJam, 1000);
         updateJam();
 
+        // ================== CARI NAMA PRODUK ONLINE ==================
+        const API_SOURCES = [
+            b => `https://world.openfoodfacts.org/api/v2/product/${encodeURIComponent(b)}.json?fields=product_name,product_name_id,brands,quantity`,
+            b => `https://world.openproductsfacts.org/api/v2/product/${encodeURIComponent(b)}.json?fields=product_name,brands,quantity`
+        ];
+
+        async function fetchJson(url, ms = 6000) {
+            const ctrl = new AbortController();
+            const t = setTimeout(() => ctrl.abort(), ms);
+            try {
+                const res = await fetch(url, { signal: ctrl.signal });
+                if (!res.ok) return null;
+                return await res.json();
+            } catch (e) { return null; }
+            finally { clearTimeout(t); }
+        }
+
+        function formatNamaProduk(p) {
+            const nama = (p.product_name_id || p.product_name || '').trim();
+            if (!nama) return null;
+            const parts = [nama];
+            const brand = (p.brands || '').split(',')[0].trim();
+            if (brand && !nama.toLowerCase().includes(brand.toLowerCase())) parts.push(brand);
+            const qty = (p.quantity || '').trim();
+            if (qty && !nama.toLowerCase().includes(qty.toLowerCase())) parts.push(qty);
+            return parts.join(' ');
+        }
+
+        async function cariNamaProdukOnline(barcode) {
+            for (const build of API_SOURCES) {
+                const data = await fetchJson(build(barcode));
+                if (data && data.status === 1 && data.product) {
+                    const nama = formatNamaProduk(data.product);
+                    if (nama) return nama;
+                }
+            }
+            return null;
+        }
+
         // ================== SCANNER KASIR ==================
         async function bukaScanner() {
-            if (scannerKasir) return; // cegah instance ganda
+            if (scannerKasir) return;
             document.getElementById('scannerContainer').classList.remove('hidden');
             scannerKasir = new Html5Qrcode('reader');
             try {
@@ -287,7 +357,7 @@
                     (decodedText) => {
                         document.getElementById('inputBarcode').value = decodedText;
                         tutupScannerAdmin();
-                        document.getElementById('inputNama').focus();
+                        isiNamaOtomatis(decodedText); // ⬅️ nama dicari otomatis
                     },
                     () => {}
                 );
@@ -328,7 +398,6 @@
             barcode = String(barcode).trim();
             if (!barcode) return;
 
-            // Cegah scan ganda dalam 2 detik
             const now = Date.now();
             if (barcode === lastScan.text && now - lastScan.time < 2000) return;
             lastScan = { text: barcode, time: now };
@@ -337,7 +406,7 @@
                 const snap = await window.fs.getDoc(window.fs.doc(window.db, 'barang', barcode));
                 if (!snap.exists()) {
                     beep(220, 220, 'sawtooth');
-                    toast('Barcode ' + barcode + ' tidak ditemukan!', 'error');
+                    bukaQuickAdd(barcode); // ⬅️ buka dialog tambah cepat, nama dicari otomatis
                     return;
                 }
                 const data = snap.data();
@@ -439,6 +508,60 @@
             }
         }
 
+        // ================== TAMBAH CEPAT (BARANG BARU) ==================
+        async function bukaQuickAdd(barcode) {
+            quickAddBarcode = barcode;
+            document.getElementById('qaBarcode').textContent = barcode;
+            document.getElementById('qaNama').value = '';
+            document.getElementById('qaHarga').value = '';
+            document.getElementById('qaStok').value = '';
+            setStatusEl('qaStatus', '🔎 Mencari nama produk di internet...', 'load');
+            document.getElementById('modalQuickAdd').classList.remove('hidden');
+
+            const nama = await cariNamaProdukOnline(barcode);
+            if (quickAddBarcode !== barcode) return; // modal sudah ditutup / berganti
+
+            if (nama) {
+                document.getElementById('qaNama').value = nama;
+                setStatusEl('qaStatus', '✅ Nama ditemukan otomatis! Tinggal isi harga.', 'ok');
+                document.getElementById('qaHarga').focus();
+            } else {
+                setStatusEl('qaStatus', 'Nama tidak ditemukan online. Ketik nama manual.', 'error');
+                document.getElementById('qaNama').focus();
+            }
+        }
+
+        function tutupQuickAdd() {
+            quickAddBarcode = null;
+            document.getElementById('modalQuickAdd').classList.add('hidden');
+            document.getElementById('manualBarcode').focus();
+        }
+
+        async function simpanQuickAdd() {
+            const barcode = quickAddBarcode;
+            const nama = document.getElementById('qaNama').value.trim();
+            const harga = parseInt((document.getElementById('qaHarga').value || '').replace(/\D/g, '')) || 0;
+            const stokRaw = document.getElementById('qaStok').value.trim();
+            const stok = stokRaw === '' ? null : Math.max(0, parseInt(stokRaw) || 0);
+
+            if (!barcode) return;
+            if (!nama) return toast('Nama barang wajib diisi!', 'error');
+            if (harga <= 0) return toast('Isi harga jual barang!', 'error');
+
+            try {
+                await window.fs.setDoc(window.fs.doc(window.db, 'barang', barcode), { nama, harga, stok });
+                const existing = keranjang.find(it => it.barcode === barcode);
+                if (existing) existing.qty += 1;
+                else keranjang.push({ barcode, nama, harga, stok, qty: 1 });
+                tampilKeranjang();
+                tutupQuickAdd();
+                beep();
+                toast(`"${nama}" tersimpan & masuk keranjang!`);
+            } catch (e) {
+                toast('Gagal simpan: ' + e.message, 'error');
+            }
+        }
+
         // ================== PEMBAYARAN ==================
         function openBayar() {
             if (keranjang.length === 0) return toast('Keranjang masih kosong!', 'warn');
@@ -481,7 +604,7 @@
                 el.className = 'text-2xl font-bold text-green-600';
                 btn.disabled = false;
             } else {
-                el.textContent = 'Kurang ' + formatRupiah(total - bayar);
+                el.textContent = 'Kurang ' + formatRupiah(total - bayak || (total - bayar));
                 el.className = 'text-2xl font-bold text-red-600';
                 btn.disabled = true;
             }
@@ -506,7 +629,6 @@
             try {
                 await window.fs.setDoc(window.fs.doc(window.db, 'transaksi', trx.id), trx);
 
-                // Kurangi stok di database
                 for (const it of keranjang) {
                     if (it.stok !== null && it.stok !== undefined) {
                         try {
@@ -606,6 +728,34 @@
             }
         }
 
+        // --- Lookup nama otomatis di form admin ---
+        function klikCariNama() {
+            isiNamaOtomatis(document.getElementById('inputBarcode').value);
+        }
+
+        async function isiNamaOtomatis(barcode) {
+            barcode = (barcode || '').trim();
+            if (!barcode) {
+                setStatusEl('statusNamaOtomatis', 'Isi / scan barcode dulu sebelum mencari nama.', 'error');
+                return;
+            }
+            if (editBarcode) {
+                if (!confirm('Mode edit: timpa nama barang dengan hasil pencarian online?')) return;
+            }
+            setStatusEl('statusNamaOtomatis', '🔎 Mencari nama produk di internet...', 'load');
+            const nama = await cariNamaProdukOnline(barcode);
+            // Abaikan hasil jika barcode di form sudah berganti
+            if (document.getElementById('inputBarcode').value.trim() !== barcode) return;
+            if (nama) {
+                document.getElementById('inputNama').value = nama;
+                setStatusEl('statusNamaOtomatis', '✅ Ditemukan: ' + nama, 'ok');
+                document.getElementById('inputHarga').focus();
+            } else {
+                setStatusEl('statusNamaOtomatis', '❌ Tidak ditemukan di database online. Isi nama manual.', 'error');
+                document.getElementById('inputNama').focus();
+            }
+        }
+
         async function loadListAdmin() {
             const divList = document.getElementById('listBarangAdmin');
             divList.innerHTML = '<p class="text-center text-gray-400 py-3">Memuat data...</p>';
@@ -663,6 +813,7 @@
             document.getElementById('inputStok').value = (b.stok === null || b.stok === undefined) ? '' : b.stok;
             document.getElementById('btnSimpanBarang').textContent = 'UPDATE BARANG';
             document.getElementById('btnBatalEdit').classList.remove('hidden');
+            setStatusEl('statusNamaOtomatis', null);
             document.getElementById('inputNama').focus();
         }
 
@@ -673,6 +824,7 @@
             bc.classList.remove('bg-gray-100');
             document.getElementById('btnSimpanBarang').textContent = 'SIMPAN BARANG';
             document.getElementById('btnBatalEdit').classList.add('hidden');
+            setStatusEl('statusNamaOtomatis', null);
         }
 
         async function simpanBarang() {
@@ -698,6 +850,7 @@
                 document.getElementById('inputHarga').value = '';
                 document.getElementById('inputStok').value = '';
                 batalEdit();
+                setStatusEl('statusNamaOtomatis', null);
                 loadListAdmin();
             } catch (error) {
                 toast('Gagal simpan: ' + error.message, 'error');
@@ -769,8 +922,9 @@
         document.getElementById('manualBarcode').addEventListener('keydown', e => {
             if (e.key === 'Enter') cariBarangManual();
         });
+        // Enter di kolom barcode admin → langsung cari nama otomatis
         document.getElementById('inputBarcode').addEventListener('keydown', e => {
-            if (e.key === 'Enter') document.getElementById('inputNama').focus();
+            if (e.key === 'Enter') { e.preventDefault(); isiNamaOtomatis(e.target.value); }
         });
         document.getElementById('inputNama').addEventListener('keydown', e => {
             if (e.key === 'Enter') document.getElementById('inputHarga').focus();
@@ -794,6 +948,20 @@
         });
         document.getElementById('inputBayar').addEventListener('keydown', e => {
             if (e.key === 'Enter') konfirmasiBayar();
+        });
+        // Modal tambah cepat
+        document.getElementById('qaHarga').addEventListener('input', function () {
+            const v = this.value.replace(/\D/g, '');
+            this.value = v ? Number(v).toLocaleString('id-ID') : '';
+        });
+        document.getElementById('qaNama').addEventListener('keydown', e => {
+            if (e.key === 'Enter') document.getElementById('qaHarga').focus();
+        });
+        document.getElementById('qaHarga').addEventListener('keydown', e => {
+            if (e.key === 'Enter') document.getElementById('qaStok').focus();
+        });
+        document.getElementById('qaStok').addEventListener('keydown', e => {
+            if (e.key === 'Enter') simpanQuickAdd();
         });
 
         // ================== INISIALISASI ==================
