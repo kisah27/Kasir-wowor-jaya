@@ -67,7 +67,7 @@
                         <div id="statusNamaOtomatis" class="hidden mb-2"></div>
                         <div class="flex gap-2 mb-2">
                             <button onclick="klikCariNama()" class="flex-1 bg-indigo-500 text-white py-1.5 rounded text-sm font-semibold hover:bg-indigo-600">🔍 Cari Nama Otomatis</button>
-                            <button onclick="testKoneksiNama()" class="bg-gray-200 text-gray-700 px-3 py-1.5 rounded text-sm font-semibold hover:bg-gray-300" title="Tes apakah koneksi ke server nama produk berfungsi">📶 Tes</button>
+                            <button onclick="testKoneksiNama()" class="bg-gray-200 text-gray-700 px-3 py-1.5 rounded text-sm font-semibold hover:bg-gray-300" title="Tes koneksi server nama produk">📶 Tes</button>
                         </div>
 
                         <input type="text" id="inputNama" placeholder="Nama Barang (otomatis / manual)" class="w-full border p-2 rounded mb-2">
@@ -79,7 +79,10 @@
 
                     <div class="flex justify-between items-center mb-2">
                         <h3 class="font-bold">Daftar Barang (<span id="jmlBarang">0</span>)</h3>
-                        <button onclick="lengkapiNamaOtomatis()" class="bg-purple-600 text-white px-2.5 py-1 rounded text-xs font-semibold hover:bg-purple-700">🤖 Isi Nama Otomatis Semua</button>
+                        <div class="flex gap-1.5">
+                            <button onclick="lengkapiNamaOtomatis()" class="bg-purple-600 text-white px-2.5 py-1 rounded text-xs font-semibold hover:bg-purple-700">🤖 Isi Nama Semua</button>
+                            <button onclick="loadListAdmin()" class="bg-gray-200 text-gray-700 px-2 py-1 rounded text-xs font-semibold hover:bg-gray-300" title="Muat ulang">🔄</button>
+                        </div>
                     </div>
                     <input type="text" id="cariBarang" placeholder="Cari nama / barcode..." class="w-full border p-2 rounded mb-2" oninput="renderListAdmin()">
                     <div id="listBarangAdmin"></div>
@@ -150,7 +153,7 @@
             </div>
         </div>
 
-        <!-- MODAL TAMBAH CEPAT (barang belum ada / belum bernama) -->
+        <!-- MODAL TAMBAH CEPAT -->
         <div id="modalQuickAdd" class="hidden absolute inset-0 bg-black/60 z-[60] flex items-center justify-center p-4">
             <div class="bg-white rounded-2xl w-full max-w-sm p-5">
                 <div class="flex justify-between items-center mb-2">
@@ -176,8 +179,10 @@
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js";
         import {
-            getFirestore, doc, getDoc, setDoc, getDocs, collection,
-            deleteDoc, updateDoc, query, orderBy, limit
+            getFirestore, initializeFirestore,
+            persistentLocalCache, persistentMultipleTabManager,
+            doc, getDoc, setDoc, getDocs, collection, deleteDoc, updateDoc,
+            query, orderBy, limit, writeBatch, increment, onSnapshot
         } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
         import { getAuth, signInAnonymously } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-auth.js";
 
@@ -192,13 +197,25 @@
         };
 
         const app = initializeApp(firebaseConfig);
-        const db = getFirestore(app);
+
+        // ⚡ Cache lokal persisten: baca data = instan dari perangkat,
+        // tulis otomatis tersinkron ke server (tahan offline)
+        let db;
+        try {
+            db = initializeFirestore(app, {
+                localCache: persistentLocalCache({ tabManager: persistentMultipleTabManager() })
+            });
+        } catch (e) {
+            db = getFirestore(app);
+        }
+
         const auth = getAuth(app);
 
         window.db = db;
-        window.fs = { doc, getDoc, setDoc, getDocs, collection, deleteDoc, updateDoc, query, orderBy, limit };
+        window.fs = { doc, getDoc, setDoc, getDocs, collection, deleteDoc, updateDoc, query, orderBy, limit, writeBatch, increment, onSnapshot };
 
-        signInAnonymously(auth).catch(error => console.error("Auth Error:", error));
+        const siap = () => window.dispatchEvent(new Event('firebase-ready'));
+        signInAnonymously(auth).then(siap).catch(err => { console.error("Auth Error:", err); siap(); });
     </script>
 
     <!-- APLIKASI UTAMA -->
@@ -219,9 +236,11 @@
         let quickAddBarcode = null;
         let cacheBarang = [];
         let cacheTransaksi = [];
+        let barangLoaded = false;
         let lastScan = { text: '', time: 0 };
         let audioCtx = null;
         const KEY_KERANJANG = 'woworjaya_keranjang_v2';
+        const jeda = ms => new Promise(r => setTimeout(r, ms));
 
         // ================== UTILITAS ==================
         function formatRupiah(angka) {
@@ -251,7 +270,6 @@
             }, 2500);
         }
 
-        // Kotak status yang jelas terlihat (admin & modal)
         function setStatusEl(id, pesan, tipe) {
             const el = document.getElementById(id);
             if (!pesan) { el.classList.add('hidden'); return; }
@@ -287,20 +305,38 @@
         setInterval(updateJam, 1000);
         updateJam();
 
+        // ================== SINKRONISASI REAL-TIME DAFTAR BARANG ==================
+        // Database barang disalin ke perangkat & selalu ter-update otomatis.
+        // Scan jadi INSTAN karena tidak perlu tanya server tiap kali.
+        function subscribeBarang() {
+            if (subscribeBarang._started || !window.fs) return;
+            subscribeBarang._started = true;
+            window.fs.onSnapshot(
+                window.fs.collection(window.db, 'barang'),
+                snap => {
+                    cacheBarang = [];
+                    snap.forEach(d => cacheBarang.push({ id: d.id, ...d.data() }));
+                    cacheBarang.sort((a, b) => (a.nama || '').localeCompare(b.nama || ''));
+                    barangLoaded = true;
+                    const adminTerbuka = !document.getElementById('adminPanel').classList.contains('hidden');
+                    const tabBarangAktif = !document.getElementById('tabBarang').classList.contains('hidden');
+                    if (adminTerbuka && tabBarangAktif) renderListAdmin();
+                },
+                err => console.error('Snapshot barang error:', err)
+            );
+        }
+        window.addEventListener('firebase-ready', subscribeBarang);
+        if (window.fs) subscribeBarang();
+
         // ================== CARI NAMA PRODUK ONLINE ==================
-        // 4 sumber dicari BERSAMAAN, yang paling cepat menemukan nama yang dipakai
-        async function fetchJson(url, ms = 8000) {
+        async function fetchJson(url, ms = 5000) {
             const ctrl = new AbortController();
             const t = setTimeout(() => ctrl.abort(), ms);
             try {
-                console.log('[Lookup] Mencoba:', url);
                 const res = await fetch(url, { signal: ctrl.signal });
-                if (!res.ok) { console.log('[Lookup] HTTP', res.status); return null; }
+                if (!res.ok) return null;
                 return await res.json();
-            } catch (e) {
-                console.log('[Lookup] Gagal:', e.message);
-                return null;
-            }
+            } catch (e) { return null; }
             finally { clearTimeout(t); }
         }
 
@@ -331,7 +367,7 @@
                 urls.forEach(url => {
                     fetchJson(url).then(data => {
                         if (selesai) return;
-                        if (data) online = true; // server merespon (walau produk tidak ada)
+                        if (data) online = true;
                         const nama = (data && data.status === 1 && data.product) ? formatNamaProduk(data.product) : null;
                         if (nama) { selesai = true; resolve({ nama, online: true }); }
                         else { sisa--; cobaSelesai(); }
@@ -383,7 +419,7 @@
                     (decodedText) => {
                         document.getElementById('inputBarcode').value = decodedText;
                         tutupScannerAdmin();
-                        isiNamaOtomatis(decodedText); // nama dicari otomatis
+                        isiNamaOtomatis(decodedText);
                     },
                     () => {}
                 );
@@ -425,48 +461,53 @@
             if (!barcode) return;
 
             const now = Date.now();
-            if (barcode === lastScan.text && now - lastScan.time < 2000) return;
+            if (barcode === lastScan.text && now - lastScan.time < 1500) return;
             lastScan = { text: barcode, time: now };
 
-            try {
-                const snap = await window.fs.getDoc(window.fs.doc(window.db, 'barang', barcode));
-                if (!snap.exists()) {
-                    beep(220, 220, 'sawtooth');
-                    bukaQuickAdd(barcode); // barang baru → dialog + cari nama otomatis
-                    return;
-                }
-                const data = snap.data();
+            // ⚡ 1) Cek cache lokal dulu → INSTAN, tanpa internet
+            let data = cacheBarang.find(b => b.id === barcode);
 
-                // ⬅️ BARU: jika barang ada tapi namanya masih kosong / masih angka barcode,
-                // buka dialog pengisian nama + cari otomatis
-                const namaDb = (data.nama || '').trim();
-                if (!namaDb || namaDb === barcode || /^\d+$/.test(namaDb)) {
-                    beep(220, 220, 'sawtooth');
-                    bukaQuickAdd(barcode, data);
-                    return;
-                }
-
-                const stok = (data.stok === undefined || data.stok === null) ? null : Number(data.stok);
-                const existing = keranjang.find(it => it.barcode === barcode);
-
-                if (stok !== null) {
-                    const diKeranjang = existing ? existing.qty : 0;
-                    if (stok <= diKeranjang) {
-                        beep(220, 220, 'sawtooth');
-                        toast(`Stok "${data.nama}" habis (max ${stok})!`, 'warn');
-                        return;
-                    }
-                }
-
-                if (existing) existing.qty += 1;
-                else keranjang.push({ barcode, nama: data.nama, harga: Number(data.harga) || 0, stok, qty: 1 });
-
-                beep();
-                tampilKeranjang();
-                toast(`+1 ${data.nama}`);
-            } catch (error) {
-                toast('Error mengambil data: ' + error.message, 'error');
+            // 2) Jika belum ada di cache (misal baru buka aplikasi), tanya server sekali
+            if (!data) {
+                try {
+                    const snap = await window.fs.getDoc(window.fs.doc(window.db, 'barang', barcode));
+                    if (snap.exists()) data = { id: barcode, ...snap.data() };
+                } catch (e) { /* offline & tidak di cache → lanjut ke tambah baru */ }
             }
+
+            // 3) Tidak ada di mana pun → dialog tambah baru + cari nama otomatis
+            if (!data) {
+                beep(220, 220, 'sawtooth');
+                bukaQuickAdd(barcode);
+                return;
+            }
+
+            // 4) Ada tapi belum bernama → minta dilengkapi
+            const namaDb = (data.nama || '').trim();
+            if (!namaDb || namaDb === barcode || /^\d+$/.test(namaDb)) {
+                beep(220, 220, 'sawtooth');
+                bukaQuickAdd(barcode, data);
+                return;
+            }
+
+            const stok = (data.stok === undefined || data.stok === null) ? null : Number(data.stok);
+            const existing = keranjang.find(it => it.barcode === barcode);
+
+            if (stok !== null) {
+                const diKeranjang = existing ? existing.qty : 0;
+                if (stok <= diKeranjang) {
+                    beep(220, 220, 'sawtooth');
+                    toast(`Stok "${data.nama}" habis (max ${stok})!`, 'warn');
+                    return;
+                }
+            }
+
+            if (existing) existing.qty += 1;
+            else keranjang.push({ barcode, nama: data.nama, harga: Number(data.harga) || 0, stok, qty: 1 });
+
+            beep();
+            tampilKeranjang();
+            toast(`+1 ${data.nama}`);
         }
 
         function cariBarangManual() {
@@ -561,14 +602,14 @@
             const barcode = quickAddBarcode;
             setStatusEl('qaStatus', '🔎 Mencari nama produk di internet...', 'load');
             const res = await cariNamaProdukOnline(barcode);
-            if (quickAddBarcode !== barcode) return; // modal sudah ditutup
+            if (quickAddBarcode !== barcode) return;
 
             if (res.nama) {
                 document.getElementById('qaNama').value = res.nama;
                 setStatusEl('qaStatus', '✅ Nama ditemukan otomatis! Tinggal isi harga.', 'ok');
                 document.getElementById('qaHarga').focus();
             } else if (res.online) {
-                setStatusEl('qaStatus', '❌ Barcode ini belum terdaftar di database produk online. Ketik nama manual.', 'error');
+                setStatusEl('qaStatus', '❌ Barcode belum terdaftar di database online. Ketik nama manual.', 'error');
                 document.getElementById('qaNama').focus();
             } else {
                 setStatusEl('qaStatus', '❌ Gagal terhubung ke internet. Cek koneksi, lalu tekan "Cari Ulang".', 'error');
@@ -598,7 +639,6 @@
                 await window.fs.setDoc(window.fs.doc(window.db, 'barang', barcode), { nama, harga, stok });
                 const existing = keranjang.find(it => it.barcode === barcode);
                 if (existing) {
-                    // sudah ada di keranjang → perbarui data (nama mungkin tadinya angka)
                     existing.nama = nama; existing.harga = harga; existing.stok = stok;
                 } else {
                     keranjang.push({ barcode, nama, harga, stok, qty: 1 });
@@ -677,17 +717,22 @@
             };
 
             try {
-                await window.fs.setDoc(window.fs.doc(window.db, 'transaksi', trx.id), trx);
-
+                // ⚡ SEMUA penulisan (transaksi + pengurangan stok semua barang)
+                // dikirim dalam SATU batch = SATU perjalanan ke server.
+                const batch = window.fs.writeBatch(window.db);
+                batch.set(window.fs.doc(window.db, 'transaksi', trx.id), trx);
                 for (const it of keranjang) {
                     if (it.stok !== null && it.stok !== undefined) {
-                        try {
-                            await window.fs.updateDoc(window.fs.doc(window.db, 'barang', it.barcode), {
-                                stok: Math.max(0, it.stok - it.qty)
-                            });
-                        } catch (e) { console.warn('Gagal update stok', it.barcode, e); }
+                        batch.update(window.fs.doc(window.db, 'barang', it.barcode), {
+                            stok: window.fs.increment(-it.qty)
+                        });
                     }
                 }
+                const commitPromise = batch.commit();
+                commitPromise.catch(() => {}); // hindari warning jika timeout menang
+                // Timeout 8 dtk: jika internet putus, tetap bisa checkout
+                // (data tersimpan lokal & tersinkron otomatis begitu online)
+                await Promise.race([commitPromise, jeda(8000)]);
 
                 keranjang = [];
                 tampilKeranjang();
@@ -751,7 +796,7 @@
             if (pin !== ADMIN_PIN) return toast('PIN salah!', 'error');
             document.getElementById('adminPanel').classList.remove('hidden');
             gantiTab('barang');
-            loadListAdmin();
+            renderListAdmin(); // data sudah live dari listener, tidak perlu fetch ulang
         }
 
         function tutupAdmin() {
@@ -770,6 +815,7 @@
                 barang.classList.remove('hidden');
                 transaksi.classList.add('hidden');
                 btnB.className = aktif; btnT.className = nonaktif;
+                renderListAdmin();
             } else {
                 transaksi.classList.remove('hidden');
                 barang.classList.add('hidden');
@@ -778,7 +824,6 @@
             }
         }
 
-        // --- Lookup nama otomatis di form admin ---
         function klikCariNama() {
             isiNamaOtomatis(document.getElementById('inputBarcode').value);
         }
@@ -804,11 +849,10 @@
                 setStatusEl('statusNamaOtomatis', '❌ Barcode belum terdaftar di database online. Isi nama manual.', 'error');
                 document.getElementById('inputNama').focus();
             } else {
-                setStatusEl('statusNamaOtomatis', '❌ Gagal koneksi internet. Cek koneksi lalu tekan "Cari Nama Otomatis" lagi.', 'error');
+                setStatusEl('statusNamaOtomatis', '❌ Gagal koneksi internet. Cek koneksi lalu tekan lagi.', 'error');
             }
         }
 
-        // --- Tes koneksi ke server nama produk ---
         async function testKoneksiNama() {
             setStatusEl('statusNamaOtomatis', '🔎 Menguji koneksi (barcode tes: Coca-Cola)...', 'load');
             const res = await cariNamaProdukOnline('5449000000996');
@@ -816,13 +860,14 @@
             else setStatusEl('statusNamaOtomatis', '❌ Koneksi gagal. Pastikan internet aktif lalu coba lagi.', 'error');
         }
 
-        // --- Isi nama otomatis untuk SEMUA barang yang namanya masih angka ---
         async function lengkapiNamaOtomatis() {
             const targets = cacheBarang.filter(b => !b.nama || b.nama.trim() === '' || b.nama === b.id || /^\d+$/.test(b.nama));
             if (targets.length === 0) return toast('Semua barang sudah punya nama. 👍');
             if (!confirm(`Cari nama online untuk ${targets.length} barang yang belum bernama?\nProses butuh internet & beberapa saat.`)) return;
             let ok = 0, gagal = 0;
-            for (const b of targets) {
+            for (let i = 0; i < targets.length; i++) {
+                setStatusEl('statusNamaOtomatis', `🤖 Memproses ${i + 1} dari ${targets.length}...`, 'load');
+                const b = targets[i];
                 const res = await cariNamaProdukOnline(b.id);
                 if (res.nama) {
                     try {
@@ -831,11 +876,9 @@
                     } catch (e) { gagal++; }
                 } else gagal++;
             }
-            toast(`Selesai: ${ok} nama terisi, ${gagal} tidak ditemukan/gagal.`);
-            loadListAdmin();
+            setStatusEl('statusNamaOtomatis', `Selesai: ${ok} nama terisi, ${gagal} tidak ditemukan/gagal.`, ok > 0 ? 'ok' : 'error');
         }
 
-        // --- Isi nama otomatis untuk SATU barang dari daftar ---
         async function lookupNamaSatu(i) {
             const b = cacheBarang[i];
             toast('Mencari nama untuk barcode ' + b.id + '...', 'warn');
@@ -844,7 +887,6 @@
                 try {
                     await window.fs.setDoc(window.fs.doc(window.db, 'barang', b.id), { nama: res.nama }, { merge: true });
                     toast('Nama diupdate: ' + res.nama);
-                    loadListAdmin();
                 } catch (e) { toast('Gagal update: ' + e.message, 'error'); }
             } else if (res.online) {
                 toast('Barcode ' + b.id + ' tidak ditemukan di database online.', 'warn');
@@ -853,22 +895,28 @@
             }
         }
 
+        // Fallback manual (tombol 🔄) — biasanya tidak dibutuhkan karena data live
         async function loadListAdmin() {
-            const divList = document.getElementById('listBarangAdmin');
-            divList.innerHTML = '<p class="text-center text-gray-400 py-3">Memuat data...</p>';
+            if (!window.fs) return toast('Database belum siap.', 'warn');
             try {
                 const snap = await window.fs.getDocs(window.fs.collection(window.db, 'barang'));
                 cacheBarang = [];
                 snap.forEach(d => cacheBarang.push({ id: d.id, ...d.data() }));
                 cacheBarang.sort((a, b) => (a.nama || '').localeCompare(b.nama || ''));
+                barangLoaded = true;
                 renderListAdmin();
             } catch (e) {
-                divList.innerHTML = '<p class="text-center text-red-500 py-3">Gagal memuat: ' + escapeHtml(e.message) + '</p>';
+                toast('Gagal memuat: ' + e.message, 'error');
             }
         }
 
         function renderListAdmin() {
             const divList = document.getElementById('listBarangAdmin');
+            if (!barangLoaded) {
+                divList.innerHTML = '<p class="text-center text-gray-400 py-3">Memuat data...</p>';
+                document.getElementById('jmlBarang').textContent = '0';
+                return;
+            }
             const f = (document.getElementById('cariBarang').value || '').toLowerCase();
             const data = cacheBarang
                 .map((b, i) => ({ b, i }))
@@ -951,7 +999,7 @@
                 document.getElementById('inputStok').value = '';
                 batalEdit();
                 setStatusEl('statusNamaOtomatis', null);
-                loadListAdmin();
+                // Daftar di bawah ter-update otomatis (real-time listener)
             } catch (error) {
                 toast('Gagal simpan: ' + error.message, 'error');
             } finally {
@@ -966,7 +1014,6 @@
             try {
                 await window.fs.deleteDoc(window.fs.doc(window.db, 'barang', b.id));
                 toast('Barang dihapus.');
-                loadListAdmin();
             } catch (e) {
                 toast('Gagal hapus: ' + e.message, 'error');
             }
