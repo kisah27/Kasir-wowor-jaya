@@ -6,10 +6,6 @@
     <title>Kasir WOWOR-JAYA</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://unpkg.com/html5-qrcode" type="text/javascript"></script>
-    <!-- Load Firebase dari CDN -->
-    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
-    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore-compat.js"></script>
-    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-auth-compat.js"></script>
     <style>
         body { font-family: 'Arial', sans-serif; }
         #reader, #readerAdmin { width: 100%; }
@@ -20,7 +16,6 @@
 
     <div class="max-w-md mx-auto bg-gray-50 min-h-screen flex flex-col shadow-lg relative">
         
-        <!-- Header -->
         <header class="bg-red-600 text-white p-4 shadow-md flex justify-between items-center">
             <div>
                 <h1 class="text-xl font-bold tracking-wider">WOWOR-JAYA</h1>
@@ -36,21 +31,18 @@
             </div>
         </header>
 
-        <!-- Panel Admin (Hidden) -->
         <div id="adminPanel" class="hidden absolute inset-0 bg-white z-50 p-4 overflow-y-auto">
             <div class="flex justify-between items-center mb-4">
                 <h2 class="text-xl font-bold text-gray-800">Admin: Input Barang</h2>
-                <button onclick="tutupAdmin()" class="text-red-600 font-bold">TUTUP X</button>
+                <button onclick="tutupAdmin()" class="text-red-600 font-bold bg-red-100 px-3 py-1 rounded">TUTUP X</button>
             </div>
             
             <div class="bg-gray-100 p-4 rounded-lg mb-4">
-                <!-- Tombol Scan untuk Admin -->
                 <button onclick="bukaScannerAdmin()" class="w-full bg-blue-600 text-white py-2 rounded-lg font-bold mb-3 flex items-center justify-center gap-2">
                     <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h2m4 0h2m4 0h2M4 12h16M4 18h2m4 0h2m4 0h2M4 4v4m0 8v4M20 4v4m0 8v4" /></svg>
                     Scan Barcode via Kamera
                 </button>
                 
-                <!-- Area Kamera Admin -->
                 <div id="scannerAdminContainer" class="hidden mb-4">
                     <div id="readerAdmin"></div>
                     <button onclick="tutupScannerAdmin()" class="w-full mt-2 bg-red-500 text-white py-1 rounded text-sm">Tutup Kamera</button>
@@ -65,19 +57,16 @@
             <div id="listBarangAdmin"></div>
         </div>
 
-        <!-- Area Scanner Kasir -->
         <div id="scannerContainer" class="hidden p-4 bg-gray-800">
             <div id="reader"></div>
             <button onclick="tutupScanner()" class="w-full mt-4 bg-red-500 text-white py-2 rounded-lg font-semibold hover:bg-red-600">Tutup Scanner</button>
         </div>
 
-        <!-- Input Manual Kasir -->
         <div class="p-4 bg-white border-b flex gap-2">
             <input type="text" id="manualBarcode" placeholder="Ketik barcode manual..." class="flex-1 border rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-red-500">
             <button onclick="cariBarangManual()" class="bg-blue-500 text-white px-4 rounded-lg hover:bg-blue-600 font-semibold">Cari</button>
         </div>
 
-        <!-- Daftar Keranjang Belanja -->
         <div class="flex-1 overflow-y-auto p-4">
             <h2 class="text-lg font-semibold text-gray-700 mb-3">Daftar Belanja</h2>
             <div id="keranjangList">
@@ -85,7 +74,6 @@
             </div>
         </div>
 
-        <!-- Total & Checkout -->
         <footer class="bg-white p-4 shadow-[0_-4px_10px_rgba(0,0,0,0.1)]">
             <div class="flex justify-between items-center mb-4">
                 <span class="text-gray-600 font-medium">Total Belanja:</span>
@@ -96,35 +84,47 @@
         </footer>
     </div>
 
-    <script>
-        // === KONFIGURASI FIREBASE (GANTI DENGAN MILIK ANDA) ===
-        const firebaseConfig = {
-            apiKey: "AIzaSyXXXXXXXXXXXXXXXXXXXXX",
-            authDomain: "kasir-xxxx.firebaseapp.com",
-            projectId: "kasir-xxxx",
-            storageBucket: "kasir-xxxx.appspot.com",
-            messagingSenderId: "123456789",
-            appId: "1:123456789:web:abcdef"
-        };
-        
-        // Inisialisasi Firebase
-        firebase.initializeApp(firebaseConfig);
-        const db = firebase.firestore();
-        const auth = firebase.auth();
+    <!-- KODE APLIKASI UTAMA -->
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js";
+        import { getFirestore, doc, getDoc, setDoc, getDocs, collection } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
+        import { getAuth, signInAnonymously } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-auth.js";
 
+        const firebaseConfig = {
+          apiKey: "AIzaSyDasfuiRfaLx3fUFSq3a8JdYDiSJCyEJuU",
+          authDomain: "kasir-wowor-jaya.firebaseapp.com",
+          projectId: "kasir-wowor-jaya",
+          storageBucket: "kasir-wowor-jaya.firebasestorage.app",
+          messagingSenderId: "237198342011",
+          appId: "1:237198342011:web:01854a6ef76690811a2fde",
+          measurementId: "G-CGLZP3S3RL"
+        };
+
+        const app = initializeApp(firebaseConfig);
+        const db = getFirestore(app);
+        const auth = getAuth(app);
+
+        // Fungsi Firebase di-attach ke window supaya HTML bisa mengaksesnya
+        window.db = db;
+        window.firestoreDoc = doc;
+        window.firestoreGetDoc = getDoc;
+        window.firestoreSetDoc = setDoc;
+        window.firestoreGetDocs = getDocs;
+        window.firestoreCollection = collection;
+
+        // Proses Login Anonim
+        signInAnonymously(auth).catch(error => console.error("Auth Error:", error));
+    </script>
+
+    <script>
         let keranjang = [];
         let html5QrCodeKasir;
         let html5QrCodeAdmin;
 
-        // Login Anonim (Wajib agar bisa akses database)
-        auth.signInAnonymously().catch(error => console.error("Auth Error:", error));
-
-        // Format Rupiah
         function formatRupiah(angka) {
             return "Rp " + angka.toLocaleString('id-ID');
         }
 
-        // === FUNGSI JAM DIGITAL ===
         function updateJam() {
             const now = new Date();
             const jam = now.getHours().toString().padStart(2, '0');
@@ -135,7 +135,6 @@
         setInterval(updateJam, 1000); 
         updateJam(); 
 
-        // === FUNGSI SCANNER KASIR (Untuk jualan) ===
         function bukaScanner() {
             document.getElementById('scannerContainer').classList.remove('hidden');
             html5QrCodeKasir = new Html5Qrcode("reader");
@@ -157,7 +156,6 @@
             document.getElementById('scannerContainer').classList.add('hidden');
         }
 
-        // === FUNGSI SCANNER ADMIN (Untuk input barang baru) ===
         function bukaScannerAdmin() {
             document.getElementById('scannerAdminContainer').classList.remove('hidden');
             html5QrCodeAdmin = new Html5Qrcode("readerAdmin");
@@ -165,10 +163,8 @@
                 { facingMode: "environment" },
                 { fps: 10, qrbox: { width: 250, height: 150 } },
                 (decodedText) => {
-                    // Hasil scan langsung masuk ke input barcode
                     document.getElementById('inputBarcode').value = decodedText;
                     tutupScannerAdmin();
-                    // Langsung fokus ke input nama barang agar cepat
                     document.getElementById('inputNama').focus();
                 },
                 () => {}
@@ -182,14 +178,13 @@
             document.getElementById('scannerAdminContainer').classList.add('hidden');
         }
 
-        // === FUNGSI CARI BARANG KE FIREBASE ===
         async function prosesBarcode(barcode) {
             try {
-                const docRef = db.collection('barang').doc(barcode);
-                const doc = await docRef.get();
+                const docRef = window.firestoreDoc(window.db, 'barang', barcode);
+                const docSnap = await window.firestoreGetDoc(docRef);
                 
-                if (doc.exists) {
-                    const barangDitemukan = doc.data();
+                if (docSnap.exists()) {
+                    const barangDitemukan = docSnap.data();
                     const itemDiKeranjang = keranjang.find(item => item.barcode === barcode);
                     
                     if (itemDiKeranjang) {
@@ -219,7 +214,6 @@
             }
         }
 
-        // === FUNGSI TAMPIL KERANJANG ===
         function tampilKeranjang() {
             const list = document.getElementById('keranjangList');
             list.innerHTML = "";
@@ -276,14 +270,19 @@
             kosongkanKeranjang();
         }
 
-        // === FUNGSI ADMIN PANEL ===
-        function bukaAdmin() { document.getElementById('adminPanel').classList.remove('hidden'); loadListAdmin(); }
-        function tutupAdmin() { 
-            tutupScannerAdmin(); // Tutup kamera jika sedang terbuka
+        // === PERBAIKAN TOMBOL ADMIN ===
+        // Kita gunakan window. agar bisa dipanggil dari tag HTML button
+        window.bukaAdmin = function() { 
+            document.getElementById('adminPanel').classList.remove('hidden'); 
+            loadListAdmin(); 
+        };
+        
+        window.tutupAdmin = function() { 
+            tutupScannerAdmin(); 
             document.getElementById('adminPanel').classList.add('hidden'); 
-        }
+        };
 
-        async function simpanBarang() {
+        window.simpanBarang = async function() {
             const barcode = document.getElementById('inputBarcode').value;
             const nama = document.getElementById('inputNama').value;
             const harga = parseInt(document.getElementById('inputHarga').value);
@@ -291,7 +290,7 @@
             if (!barcode || !nama || !harga) return alert("Semua kolom wajib diisi!");
 
             try {
-                await db.collection('barang').doc(barcode).set({
+                await window.firestoreSetDoc(window.firestoreDoc(window.db, 'barang', barcode), {
                     nama: nama,
                     harga: harga
                 });
@@ -301,17 +300,17 @@
                 document.getElementById('inputHarga').value = "";
                 loadListAdmin();
             } catch (error) {
-                alert("Gagal simpan: " + error);
+                alert("Gagal simpan: " + error.message);
             }
-        }
+        };
 
         async function loadListAdmin() {
             const divList = document.getElementById('listBarangAdmin');
             divList.innerHTML = "<p>Loading...</p>";
             try {
-                const snapshot = await db.collection('barang').get();
+                const querySnapshot = await window.firestoreGetDocs(window.firestoreCollection(window.db, 'barang'));
                 divList.innerHTML = "";
-                snapshot.forEach(doc => {
+                querySnapshot.forEach((doc) => {
                     const data = doc.data();
                     divList.innerHTML += `
                         <div class="flex justify-between bg-gray-50 p-2 border-b text-sm">
