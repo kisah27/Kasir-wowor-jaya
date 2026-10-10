@@ -3,20 +3,23 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="theme-color" content="#dc2626">
     <title>Kasir WOWOR-JAYA</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://unpkg.com/html5-qrcode" type="text/javascript"></script>
     <style>
-        body { font-family: 'Arial', sans-serif; }
+        body { font-family: 'Segoe UI', Arial, sans-serif; }
         #reader, #readerAdmin { width: 100%; }
         #reader video, #readerAdmin video { border-radius: 8px; }
+        summary::-webkit-details-marker { display: none; }
     </style>
 </head>
 <body class="bg-gray-100">
 
     <div class="max-w-md mx-auto bg-gray-50 min-h-screen flex flex-col shadow-lg relative">
-        
-        <header class="bg-red-600 text-white p-4 shadow-md flex justify-between items-center">
+
+        <!-- HEADER -->
+        <header class="bg-red-600 text-white p-4 shadow-md flex justify-between items-center z-10">
             <div>
                 <h1 class="text-xl font-bold tracking-wider">WOWOR-JAYA</h1>
                 <p id="jamDigital" class="text-xs text-red-100 font-mono mt-1">--:--:--</p>
@@ -31,63 +34,121 @@
             </div>
         </header>
 
-        <div id="adminPanel" class="hidden absolute inset-0 bg-white z-50 p-4 overflow-y-auto">
-            <div class="flex justify-between items-center mb-4">
-                <h2 class="text-xl font-bold text-gray-800">Admin: Input Barang</h2>
-                <button onclick="tutupAdmin()" class="text-red-600 font-bold bg-red-100 px-3 py-1 rounded">TUTUP X</button>
+        <!-- TOAST NOTIFIKASI -->
+        <div id="toastBox" class="pointer-events-none absolute top-16 left-1/2 -translate-x-1/2 z-[70] w-80 max-w-[92%] space-y-2"></div>
+
+        <!-- PANEL ADMIN -->
+        <div id="adminPanel" class="hidden absolute inset-0 bg-white z-50 flex flex-col">
+            <div class="p-4 border-b flex justify-between items-center bg-gray-50">
+                <h2 class="text-xl font-bold text-gray-800">Admin Panel</h2>
+                <button onclick="tutupAdmin()" class="text-red-600 font-bold bg-red-100 px-3 py-1 rounded hover:bg-red-200">TUTUP X</button>
             </div>
-            
-            <div class="bg-gray-100 p-4 rounded-lg mb-4">
-                <button onclick="bukaScannerAdmin()" class="w-full bg-blue-600 text-white py-2 rounded-lg font-bold mb-3 flex items-center justify-center gap-2">
-                    <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h2m4 0h2m4 0h2M4 12h16M4 18h2m4 0h2m4 0h2M4 4v4m0 8v4M20 4v4m0 8v4" /></svg>
-                    Scan Barcode via Kamera
-                </button>
-                
-                <div id="scannerAdminContainer" class="hidden mb-4">
-                    <div id="readerAdmin"></div>
-                    <button onclick="tutupScannerAdmin()" class="w-full mt-2 bg-red-500 text-white py-1 rounded text-sm">Tutup Kamera</button>
+
+            <!-- TAB -->
+            <div class="flex border-b bg-white">
+                <button id="tabBtnBarang" onclick="gantiTab('barang')" class="flex-1 py-2 text-sm font-bold border-b-2 border-red-600 text-red-600">📦 Barang</button>
+                <button id="tabBtnTransaksi" onclick="gantiTab('transaksi')" class="flex-1 py-2 text-sm font-bold border-b-2 border-transparent text-gray-500">🧾 Riwayat</button>
+            </div>
+
+            <div class="flex-1 overflow-y-auto p-4">
+                <!-- TAB: BARANG -->
+                <div id="tabBarang">
+                    <div class="bg-gray-100 p-4 rounded-lg mb-4">
+                        <button onclick="bukaScannerAdmin()" class="w-full bg-blue-600 text-white py-2 rounded-lg font-bold mb-3 flex items-center justify-center gap-2">
+                            <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h2m4 0h2m4 0h2M4 12h16M4 18h2m4 0h2m4 0h2M4 4v4m0 8v4M20 4v4m0 8v4" /></svg>
+                            Scan Barcode via Kamera
+                        </button>
+                        <div id="scannerAdminContainer" class="hidden mb-4">
+                            <div id="readerAdmin"></div>
+                            <button onclick="tutupScannerAdmin()" class="w-full mt-2 bg-red-500 text-white py-1 rounded text-sm">Tutup Kamera</button>
+                        </div>
+
+                        <input type="text" id="inputBarcode" placeholder="Hasil scan / Ketik Barcode" class="w-full border p-2 rounded mb-2">
+                        <input type="text" id="inputNama" placeholder="Nama Barang" class="w-full border p-2 rounded mb-2">
+                        <input type="text" id="inputHarga" inputmode="numeric" placeholder="Harga (misal: 5000)" class="w-full border p-2 rounded mb-2">
+                        <input type="number" id="inputStok" min="0" placeholder="Stok (kosongkan = tak terbatas)" class="w-full border p-2 rounded mb-2">
+                        <button id="btnSimpanBarang" onclick="simpanBarang()" class="w-full bg-green-500 text-white py-2 rounded-lg font-bold disabled:opacity-50">SIMPAN BARANG</button>
+                        <button id="btnBatalEdit" onclick="batalEdit()" class="hidden w-full mt-2 bg-gray-300 text-gray-700 py-1.5 rounded-lg text-sm font-semibold">Batal Edit</button>
+                    </div>
+
+                    <h3 class="font-bold mb-2">Daftar Barang (<span id="jmlBarang">0</span>)</h3>
+                    <input type="text" id="cariBarang" placeholder="Cari nama / barcode..." class="w-full border p-2 rounded mb-2" oninput="renderListAdmin()">
+                    <div id="listBarangAdmin"></div>
                 </div>
 
-                <input type="text" id="inputBarcode" placeholder="Hasil scan/Ketik Barcode" class="w-full border p-2 rounded mb-2"><br>
-                <input type="text" id="inputNama" placeholder="Nama Barang" class="w-full border p-2 rounded mb-2"><br>
-                <input type="number" id="inputHarga" placeholder="Harga (misal: 5000)" class="w-full border p-2 rounded mb-2"><br>
-                <button onclick="simpanBarang()" class="w-full bg-green-500 text-white py-2 rounded-lg font-bold">SIMPAN KE FIREBASE</button>
+                <!-- TAB: RIWAYAT TRANSAKSI -->
+                <div id="tabTransaksi" class="hidden">
+                    <button onclick="loadTransaksi()" class="w-full bg-blue-500 text-white py-2 rounded-lg font-bold mb-3 text-sm">🔄 Muat Ulang Riwayat</button>
+                    <div id="listTransaksi"></div>
+                </div>
             </div>
-            <h3 class="font-bold mb-2">Daftar Barang di Database:</h3>
-            <div id="listBarangAdmin"></div>
         </div>
 
+        <!-- SCANNER KASIR -->
         <div id="scannerContainer" class="hidden p-4 bg-gray-800">
             <div id="reader"></div>
-            <button onclick="tutupScanner()" class="w-full mt-4 bg-red-500 text-white py-2 rounded-lg font-semibold hover:bg-red-600">Tutup Scanner</button>
+            <label class="flex items-center gap-2 mt-3 text-white text-sm">
+                <input type="checkbox" id="chkBeruntun" class="w-4 h-4 accent-green-500">
+                Mode beruntun (kamera tetap aktif)
+            </label>
+            <button onclick="tutupScanner()" class="w-full mt-3 bg-red-500 text-white py-2 rounded-lg font-semibold hover:bg-red-600">Tutup Scanner</button>
         </div>
 
+        <!-- INPUT MANUAL -->
         <div class="p-4 bg-white border-b flex gap-2">
-            <input type="text" id="manualBarcode" placeholder="Ketik barcode manual..." class="flex-1 border rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-red-500">
+            <input type="text" id="manualBarcode" placeholder="Ketik / scan barcode manual..." class="flex-1 border rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-red-500">
             <button onclick="cariBarangManual()" class="bg-blue-500 text-white px-4 rounded-lg hover:bg-blue-600 font-semibold">Cari</button>
         </div>
 
+        <!-- KERANJANG -->
         <div class="flex-1 overflow-y-auto p-4">
             <h2 class="text-lg font-semibold text-gray-700 mb-3">Daftar Belanja</h2>
-            <div id="keranjangList">
-                <p class="text-gray-400 text-center mt-10">Keranjang kosong. Silakan scan barang.</p>
-            </div>
+            <div id="keranjangList"></div>
         </div>
 
+        <!-- FOOTER -->
         <footer class="bg-white p-4 shadow-[0_-4px_10px_rgba(0,0,0,0.1)]">
-            <div class="flex justify-between items-center mb-4">
-                <span class="text-gray-600 font-medium">Total Belanja:</span>
+            <div class="flex justify-between items-center mb-3">
+                <div>
+                    <span class="text-gray-600 font-medium">Total Belanja</span>
+                    <span id="totalItem" class="text-xs text-gray-400 ml-1">(0 pcs)</span>
+                </div>
                 <span id="totalHarga" class="text-2xl font-bold text-red-600">Rp 0</span>
             </div>
-            <button onclick="checkout()" class="w-full bg-green-500 text-white py-3 rounded-lg font-bold text-lg hover:bg-green-600 transition">Bayar</button>
+            <button onclick="openBayar()" class="w-full bg-green-500 text-white py-3 rounded-lg font-bold text-lg hover:bg-green-600 transition">BAYAR</button>
             <button onclick="kosongkanKeranjang()" class="w-full mt-2 text-gray-500 py-2 rounded-lg hover:bg-gray-100 text-sm">Kosongkan Keranjang</button>
         </footer>
+
+        <!-- MODAL PEMBAYARAN -->
+        <div id="modalBayar" class="hidden absolute inset-0 bg-black/60 z-[60] flex items-center justify-center p-4" onclick="if(event.target===this) tutupBayar()">
+            <div class="bg-white rounded-2xl w-full max-w-sm p-5">
+                <div class="flex justify-between items-center mb-4">
+                    <h3 class="text-lg font-bold text-gray-800">Pembayaran</h3>
+                    <button onclick="tutupBayar()" class="text-gray-400 hover:text-gray-600 text-2xl font-bold leading-none">&times;</button>
+                </div>
+                <div class="flex justify-between items-center bg-gray-100 rounded-lg p-3 mb-3">
+                    <span class="text-gray-500 text-sm">Total</span>
+                    <span id="bayarTotal" class="text-xl font-bold text-gray-800">Rp 0</span>
+                </div>
+                <label class="text-sm text-gray-500">Uang Diterima</label>
+                <input type="text" id="inputBayar" inputmode="numeric" placeholder="0" class="w-full border-2 border-gray-200 focus:border-red-500 focus:outline-none rounded-lg px-3 py-2 text-xl font-bold mb-3">
+                <div id="quickBayar" class="flex flex-wrap gap-1.5 mb-3"></div>
+                <div class="flex justify-between items-center border-t pt-3 mb-4">
+                    <span class="text-gray-500 text-sm">Kembalian</span>
+                    <span id="kembalianDisplay" class="text-2xl font-bold text-green-600">Rp 0</span>
+                </div>
+                <button id="btnKonfirmasiBayar" onclick="konfirmasiBayar()" class="w-full bg-green-500 text-white py-3 rounded-lg font-bold text-lg hover:bg-green-600 disabled:opacity-50 disabled:cursor-not-allowed">✓ Konfirmasi & Cetak Struk</button>
+            </div>
+        </div>
     </div>
 
-    <!-- KODE APLIKASI UTAMA -->
+    <!-- KONEKSI FIREBASE -->
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js";
-        import { getFirestore, doc, getDoc, setDoc, getDocs, collection } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
+        import {
+            getFirestore, doc, getDoc, setDoc, getDocs, collection,
+            deleteDoc, updateDoc, query, orderBy, limit
+        } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
         import { getAuth, signInAnonymously } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-auth.js";
 
         const firebaseConfig = {
@@ -104,225 +165,640 @@
         const db = getFirestore(app);
         const auth = getAuth(app);
 
-        // Fungsi Firebase di-attach ke window supaya HTML bisa mengaksesnya
+        // Ekspos ke script non-module
         window.db = db;
-        window.firestoreDoc = doc;
-        window.firestoreGetDoc = getDoc;
-        window.firestoreSetDoc = setDoc;
-        window.firestoreGetDocs = getDocs;
-        window.firestoreCollection = collection;
+        window.fs = { doc, getDoc, setDoc, getDocs, collection, deleteDoc, updateDoc, query, orderBy, limit };
 
-        // Proses Login Anonim
         signInAnonymously(auth).catch(error => console.error("Auth Error:", error));
     </script>
 
+    <!-- APLIKASI UTAMA -->
     <script>
-        let keranjang = [];
-        let html5QrCodeKasir;
-        let html5QrCodeAdmin;
+        // ================== KONFIGURASI ==================
+        const ADMIN_PIN = '1234'; // ⚠️ GANTI PIN ADMIN INI!
+        const TOKO = {
+            nama: 'WOWOR-JAYA',
+            alamat: 'Jl. Contoh No. 123',
+            telp: '0812-xxxx-xxxx',
+            footer: 'Terima kasih atas kunjungan Anda!'
+        };
 
+        let keranjang = [];
+        let scannerKasir = null;
+        let scannerAdmin = null;
+        let editBarcode = null;
+        let cacheBarang = [];
+        let cacheTransaksi = [];
+        let lastScan = { text: '', time: 0 };
+        let audioCtx = null;
+        const KEY_KERANJANG = 'woworjaya_keranjang_v2';
+
+        // ================== UTILITAS ==================
         function formatRupiah(angka) {
-            return "Rp " + angka.toLocaleString('id-ID');
+            return 'Rp ' + (Number(angka) || 0).toLocaleString('id-ID');
+        }
+
+        function escapeHtml(str) {
+            return String(str ?? '').replace(/[&<>"']/g, c =>
+                ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c]));
+        }
+
+        function formatTanggal(ms) {
+            return new Date(ms).toLocaleString('id-ID', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+        }
+
+        function toast(msg, type = 'success') {
+            const box = document.getElementById('toastBox');
+            const el = document.createElement('div');
+            const warna = type === 'error' ? 'bg-red-600' : type === 'warn' ? 'bg-amber-500' : 'bg-green-600';
+            el.className = `${warna} text-white px-4 py-2.5 rounded-xl shadow-lg text-sm font-medium text-center opacity-0 transition-opacity duration-300`;
+            el.textContent = msg;
+            box.appendChild(el);
+            requestAnimationFrame(() => el.classList.remove('opacity-0'));
+            setTimeout(() => {
+                el.classList.add('opacity-0');
+                setTimeout(() => el.remove(), 350);
+            }, 2500);
+        }
+
+        function beep(freq = 1100, durasi = 80, tipe = 'square', volume = 0.08) {
+            try {
+                audioCtx = audioCtx || new (window.AudioContext || window.webkitAudioContext)();
+                const osc = audioCtx.createOscillator();
+                const gain = audioCtx.createGain();
+                osc.type = tipe;
+                osc.frequency.value = freq;
+                gain.gain.value = volume;
+                osc.connect(gain); gain.connect(audioCtx.destination);
+                osc.start();
+                osc.stop(audioCtx.currentTime + durasi / 1000);
+            } catch (e) {}
         }
 
         function updateJam() {
             const now = new Date();
-            const jam = now.getHours().toString().padStart(2, '0');
-            const menit = now.getMinutes().toString().padStart(2, '0');
-            const detik = now.getSeconds().toString().padStart(2, '0');
-            document.getElementById('jamDigital').textContent = `${jam}:${menit}:${detik}`;
+            const jam = now.toLocaleTimeString('id-ID', { hour12: false });
+            const tgl = now.toLocaleDateString('id-ID', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' });
+            document.getElementById('jamDigital').textContent = `${tgl} • ${jam}`;
         }
-        setInterval(updateJam, 1000); 
-        updateJam(); 
+        setInterval(updateJam, 1000);
+        updateJam();
 
-        function bukaScanner() {
+        // ================== SCANNER KASIR ==================
+        async function bukaScanner() {
+            if (scannerKasir) return; // cegah instance ganda
             document.getElementById('scannerContainer').classList.remove('hidden');
-            html5QrCodeKasir = new Html5Qrcode("reader");
-            html5QrCodeKasir.start(
-                { facingMode: "environment" },
-                { fps: 10, qrbox: { width: 250, height: 150 } },
-                (decodedText) => {
-                    prosesBarcode(decodedText);
-                    tutupScanner();
-                },
-                () => {}
-            ).catch(err => alert("Gagal akses kamera: " + err));
+            scannerKasir = new Html5Qrcode('reader');
+            try {
+                await scannerKasir.start(
+                    { facingMode: 'environment' },
+                    { fps: 10, qrbox: { width: 240, height: 140 } },
+                    (decodedText) => {
+                        prosesBarcode(decodedText);
+                        if (!document.getElementById('chkBeruntun').checked) tutupScanner();
+                    },
+                    () => {}
+                );
+            } catch (err) {
+                scannerKasir = null;
+                document.getElementById('scannerContainer').classList.add('hidden');
+                toast('Gagal akses kamera: ' + err, 'error');
+            }
         }
 
-        function tutupScanner() {
-            if (html5QrCodeKasir) {
-                html5QrCodeKasir.stop().then(() => html5QrCodeKasir.clear()).catch(err => console.error(err));
-            }
+        async function tutupScanner() {
             document.getElementById('scannerContainer').classList.add('hidden');
-        }
-
-        function bukaScannerAdmin() {
-            document.getElementById('scannerAdminContainer').classList.remove('hidden');
-            html5QrCodeAdmin = new Html5Qrcode("readerAdmin");
-            html5QrCodeAdmin.start(
-                { facingMode: "environment" },
-                { fps: 10, qrbox: { width: 250, height: 150 } },
-                (decodedText) => {
-                    document.getElementById('inputBarcode').value = decodedText;
-                    tutupScannerAdmin();
-                    document.getElementById('inputNama').focus();
-                },
-                () => {}
-            ).catch(err => alert("Gagal akses kamera: " + err));
-        }
-
-        function tutupScannerAdmin() {
-            if (html5QrCodeAdmin) {
-                html5QrCodeAdmin.stop().then(() => html5QrCodeAdmin.clear()).catch(err => console.error(err));
+            if (scannerKasir) {
+                const s = scannerKasir;
+                scannerKasir = null;
+                try { await s.stop(); s.clear(); } catch (e) { console.error(e); }
             }
+            document.getElementById('manualBarcode').focus();
+        }
+
+        async function bukaScannerAdmin() {
+            if (scannerAdmin) return;
+            document.getElementById('scannerAdminContainer').classList.remove('hidden');
+            scannerAdmin = new Html5Qrcode('readerAdmin');
+            try {
+                await scannerAdmin.start(
+                    { facingMode: 'environment' },
+                    { fps: 10, qrbox: { width: 240, height: 140 } },
+                    (decodedText) => {
+                        document.getElementById('inputBarcode').value = decodedText;
+                        tutupScannerAdmin();
+                        document.getElementById('inputNama').focus();
+                    },
+                    () => {}
+                );
+            } catch (err) {
+                scannerAdmin = null;
+                document.getElementById('scannerAdminContainer').classList.add('hidden');
+                toast('Gagal akses kamera: ' + err, 'error');
+            }
+        }
+
+        async function tutupScannerAdmin() {
             document.getElementById('scannerAdminContainer').classList.add('hidden');
+            if (scannerAdmin) {
+                const s = scannerAdmin;
+                scannerAdmin = null;
+                try { await s.stop(); s.clear(); } catch (e) { console.error(e); }
+            }
+        }
+
+        // ================== KERANJANG ==================
+        function simpanKeranjang() {
+            try { localStorage.setItem(KEY_KERANJANG, JSON.stringify(keranjang)); } catch (e) {}
+        }
+
+        function muatKeranjang() {
+            try {
+                keranjang = JSON.parse(localStorage.getItem(KEY_KERANJANG)) || [];
+            } catch (e) { keranjang = []; }
+            tampilKeranjang();
+        }
+
+        function hitungTotalKeranjang() {
+            return keranjang.reduce((acc, item) => acc + item.harga * item.qty, 0);
         }
 
         async function prosesBarcode(barcode) {
+            if (!window.fs) return toast('Koneksi database belum siap, coba lagi.', 'warn');
+            barcode = String(barcode).trim();
+            if (!barcode) return;
+
+            // Cegah scan ganda dalam 2 detik
+            const now = Date.now();
+            if (barcode === lastScan.text && now - lastScan.time < 2000) return;
+            lastScan = { text: barcode, time: now };
+
             try {
-                const docRef = window.firestoreDoc(window.db, 'barang', barcode);
-                const docSnap = await window.firestoreGetDoc(docRef);
-                
-                if (docSnap.exists()) {
-                    const barangDitemukan = docSnap.data();
-                    const itemDiKeranjang = keranjang.find(item => item.barcode === barcode);
-                    
-                    if (itemDiKeranjang) {
-                        itemDiKeranjang.qty += 1;
-                    } else {
-                        keranjang.push({
-                            barcode: barcode,
-                            nama: barangDitemukan.nama,
-                            harga: barangDitemukan.harga,
-                            qty: 1
-                        });
-                    }
-                    tampilKeranjang();
-                } else {
-                    alert("Barang dengan barcode " + barcode + " tidak ada di database!\nSilakan buka Admin untuk menambahkan.");
+                const snap = await window.fs.getDoc(window.fs.doc(window.db, 'barang', barcode));
+                if (!snap.exists()) {
+                    beep(220, 220, 'sawtooth');
+                    toast('Barcode ' + barcode + ' tidak ditemukan!', 'error');
+                    return;
                 }
+                const data = snap.data();
+                const stok = (data.stok === undefined || data.stok === null) ? null : Number(data.stok);
+                const existing = keranjang.find(it => it.barcode === barcode);
+
+                if (stok !== null) {
+                    const diKeranjang = existing ? existing.qty : 0;
+                    if (stok <= diKeranjang) {
+                        beep(220, 220, 'sawtooth');
+                        toast(`Stok "${data.nama}" habis (max ${stok})!`, 'warn');
+                        return;
+                    }
+                }
+
+                if (existing) existing.qty += 1;
+                else keranjang.push({ barcode, nama: data.nama, harga: Number(data.harga) || 0, stok, qty: 1 });
+
+                beep();
+                tampilKeranjang();
+                toast(`+1 ${data.nama}`);
             } catch (error) {
-                alert("Error mengambil data: " + error);
+                toast('Error mengambil data: ' + error.message, 'error');
             }
         }
 
         function cariBarangManual() {
-            const barcode = document.getElementById('manualBarcode').value;
+            const input = document.getElementById('manualBarcode');
+            const barcode = input.value.trim();
             if (barcode) {
                 prosesBarcode(barcode);
-                document.getElementById('manualBarcode').value = "";
+                input.value = '';
             }
         }
 
         function tampilKeranjang() {
+            simpanKeranjang();
             const list = document.getElementById('keranjangList');
-            list.innerHTML = "";
+            list.innerHTML = '';
+
+            const totalPcs = keranjang.reduce((a, i) => a + i.qty, 0);
+            document.getElementById('totalItem').textContent = `(${totalPcs} pcs)`;
+
             if (keranjang.length === 0) {
                 list.innerHTML = '<p class="text-gray-400 text-center mt-10">Keranjang kosong. Silakan scan barang.</p>';
                 document.getElementById('totalHarga').innerText = formatRupiah(0);
                 return;
             }
+
             keranjang.forEach((item, index) => {
                 const subtotal = item.harga * item.qty;
+                const stokBadge = item.stok !== null
+                    ? `<span class="text-[10px] bg-blue-100 text-blue-600 px-1.5 py-0.5 rounded ml-1">Stok: ${item.stok}</span>` : '';
                 const div = document.createElement('div');
-                div.className = "flex justify-between items-center bg-white p-3 mb-2 rounded-lg shadow-sm border";
+                div.className = 'flex justify-between items-center bg-white p-3 mb-2 rounded-lg shadow-sm border';
                 div.innerHTML = `
-                    <div class="flex-1">
-                        <h3 class="font-semibold text-gray-800">${item.nama}</h3>
-                        <p class="text-sm text-gray-500">${formatRupiah(item.harga)} x ${item.qty}</p>
+                    <div class="flex-1 min-w-0">
+                        <h3 class="font-semibold text-gray-800 text-sm truncate">${escapeHtml(item.nama)}${stokBadge}</h3>
+                        <p class="text-xs text-gray-500">${formatRupiah(item.harga)} x ${item.qty}</p>
                     </div>
-                    <div class="flex items-center gap-2">
-                        <span class="font-bold text-gray-800 mr-2">${formatRupiah(subtotal)}</span>
+                    <div class="flex items-center gap-1.5 ml-2">
+                        <span class="font-bold text-gray-800 text-sm mr-1">${formatRupiah(subtotal)}</span>
                         <button onclick="kurangQty(${index})" class="bg-gray-200 w-7 h-7 rounded-full font-bold hover:bg-gray-300">-</button>
                         <button onclick="tambahQty(${index})" class="bg-gray-200 w-7 h-7 rounded-full font-bold hover:bg-gray-300">+</button>
-                        <button onclick="hapusBarang(${index})" class="bg-red-100 text-red-600 w-7 h-7 rounded-full font-bold hover:bg-red-200">X</button>
+                        <button onclick="hapusBarang(${index})" class="bg-red-100 text-red-600 w-7 h-7 rounded-full font-bold hover:bg-red-200">×</button>
                     </div>
                 `;
                 list.appendChild(div);
             });
-            hitungTotal();
+            document.getElementById('totalHarga').innerText = formatRupiah(hitungTotalKeranjang());
         }
 
-        function tambahQty(i) { keranjang[i].qty += 1; tampilKeranjang(); }
+        function tambahQty(i) {
+            const it = keranjang[i];
+            if (it.stok !== null && it.qty + 1 > it.stok) {
+                toast(`Stok "${it.nama}" maksimal ${it.stok}!`, 'warn');
+                return;
+            }
+            it.qty += 1;
+            tampilKeranjang();
+        }
+
         function kurangQty(i) {
             if (keranjang[i].qty > 1) keranjang[i].qty -= 1;
             else keranjang.splice(i, 1);
             tampilKeranjang();
         }
-        function hapusBarang(i) { keranjang.splice(i, 1); tampilKeranjang(); }
 
-        function hitungTotal() {
-            let total = keranjang.reduce((acc, item) => acc + (item.harga * item.qty), 0);
-            document.getElementById('totalHarga').innerText = formatRupiah(total);
+        function hapusBarang(i) {
+            keranjang.splice(i, 1);
+            tampilKeranjang();
         }
 
         function kosongkanKeranjang() {
-            if (confirm("Yakin mengosongkan keranjang?")) {
+            if (keranjang.length === 0) return;
+            if (confirm('Yakin mengosongkan keranjang?')) {
                 keranjang = [];
                 tampilKeranjang();
             }
         }
 
-        function checkout() {
-            if (keranjang.length === 0) return alert("Keranjang kosong!");
-            let total = keranjang.reduce((acc, item) => acc + (item.harga * item.qty), 0);
-            alert("Transaksi Berhasil!\n\nTotal: " + formatRupiah(total) + "\n\nCetak struk...");
-            kosongkanKeranjang();
+        // ================== PEMBAYARAN ==================
+        function openBayar() {
+            if (keranjang.length === 0) return toast('Keranjang masih kosong!', 'warn');
+            const total = hitungTotalKeranjang();
+            document.getElementById('bayarTotal').textContent = formatRupiah(total);
+            document.getElementById('inputBayar').value = total.toLocaleString('id-ID');
+            renderQuickBayar(total);
+            updateKembalian();
+            document.getElementById('modalBayar').classList.remove('hidden');
+            setTimeout(() => document.getElementById('inputBayar').select(), 120);
         }
 
-        // === PERBAIKAN TOMBOL ADMIN ===
-        // Kita gunakan window. agar bisa dipanggil dari tag HTML button
-        window.bukaAdmin = function() { 
-            document.getElementById('adminPanel').classList.remove('hidden'); 
-            loadListAdmin(); 
-        };
-        
-        window.tutupAdmin = function() { 
-            tutupScannerAdmin(); 
-            document.getElementById('adminPanel').classList.add('hidden'); 
-        };
+        function tutupBayar() {
+            document.getElementById('modalBayar').classList.add('hidden');
+        }
 
-        window.simpanBarang = async function() {
-            const barcode = document.getElementById('inputBarcode').value;
-            const nama = document.getElementById('inputNama').value;
-            const harga = parseInt(document.getElementById('inputHarga').value);
+        function renderQuickBayar(total) {
+            const opts = new Set([total]);
+            [1000, 5000, 10000, 20000, 50000, 100000].forEach(n => { if (n > total) opts.add(n); });
+            const bulat = Math.ceil(total / 5000) * 5000;
+            if (bulat > total) opts.add(bulat);
+            const sorted = [...opts].sort((a, b) => a - b).slice(0, 7);
+            document.getElementById('quickBayar').innerHTML = sorted.map(n =>
+                `<button onclick="setBayar(${n})" class="bg-gray-100 hover:bg-red-100 hover:text-red-600 px-2.5 py-1.5 rounded-lg text-xs font-semibold transition">${n === total ? 'Uang Pas' : formatRupiah(n)}</button>`
+            ).join('');
+        }
 
-            if (!barcode || !nama || !harga) return alert("Semua kolom wajib diisi!");
+        function setBayar(nilai) {
+            document.getElementById('inputBayar').value = nilai.toLocaleString('id-ID');
+            updateKembalian();
+        }
+
+        function updateKembalian() {
+            const bayar = parseInt((document.getElementById('inputBayar').value || '').replace(/\D/g, '')) || 0;
+            const total = hitungTotalKeranjang();
+            const el = document.getElementById('kembalianDisplay');
+            const btn = document.getElementById('btnKonfirmasiBayar');
+            if (bayar >= total) {
+                el.textContent = formatRupiah(bayar - total);
+                el.className = 'text-2xl font-bold text-green-600';
+                btn.disabled = false;
+            } else {
+                el.textContent = 'Kurang ' + formatRupiah(total - bayar);
+                el.className = 'text-2xl font-bold text-red-600';
+                btn.disabled = true;
+            }
+        }
+
+        async function konfirmasiBayar() {
+            const total = hitungTotalKeranjang();
+            const bayar = parseInt((document.getElementById('inputBayar').value || '').replace(/\D/g, '')) || 0;
+            if (bayar < total) return toast('Uang bayar kurang!', 'error');
+
+            const btn = document.getElementById('btnKonfirmasiBayar');
+            btn.disabled = true;
+            btn.textContent = 'Menyimpan...';
+
+            const trx = {
+                id: 'TRX' + Date.now(),
+                waktu: Date.now(),
+                items: keranjang.map(i => ({ barcode: i.barcode, nama: i.nama, harga: i.harga, qty: i.qty })),
+                total, bayar, kembalian: bayar - total
+            };
 
             try {
-                await window.firestoreSetDoc(window.firestoreDoc(window.db, 'barang', barcode), {
-                    nama: nama,
-                    harga: harga
-                });
-                alert("Barang berhasil disimpan ke Firebase!");
-                document.getElementById('inputBarcode').value = "";
-                document.getElementById('inputNama').value = "";
-                document.getElementById('inputHarga').value = "";
-                loadListAdmin();
+                await window.fs.setDoc(window.fs.doc(window.db, 'transaksi', trx.id), trx);
+
+                // Kurangi stok di database
+                for (const it of keranjang) {
+                    if (it.stok !== null && it.stok !== undefined) {
+                        try {
+                            await window.fs.updateDoc(window.fs.doc(window.db, 'barang', it.barcode), {
+                                stok: Math.max(0, it.stok - it.qty)
+                            });
+                        } catch (e) { console.warn('Gagal update stok', it.barcode, e); }
+                    }
+                }
+
+                keranjang = [];
+                tampilKeranjang();
+                tutupBayar();
+                toast('Transaksi berhasil disimpan!');
+                cetakStruk(trx);
             } catch (error) {
-                alert("Gagal simpan: " + error.message);
+                toast('Gagal menyimpan transaksi: ' + error.message, 'error');
+            } finally {
+                btn.disabled = false;
+                btn.textContent = '✓ Konfirmasi & Cetak Struk';
             }
-        };
+        }
+
+        // ================== STRUK ==================
+        function cetakStruk(trx) {
+            const w = window.open('', '_blank', 'width=340,height=520');
+            if (!w) return toast('Izinkan popup untuk mencetak struk!', 'warn');
+
+            const garis = '<div class="line"></div>';
+            const rows = (trx.items || []).map(it => `
+                <div>${escapeHtml(it.nama)}</div>
+                <div class="row"><span>&nbsp;&nbsp;${it.qty} x ${formatRupiah(it.harga)}</span><span>${formatRupiah(it.harga * it.qty)}</span></div>
+            `).join('');
+
+            w.document.write(`<!DOCTYPE html><html><head><meta charset="utf-8"><title>Struk ${trx.id}</title><style>
+                @page { size: 80mm auto; margin: 3mm; }
+                body { font-family: 'Courier New', monospace; font-size: 12px; width: 72mm; margin: 0 auto; color: #000; }
+                .c { text-align: center; }
+                .row { display: flex; justify-content: space-between; }
+                .line { border-top: 1px dashed #000; margin: 5px 0; }
+                h2 { margin: 2px 0; font-size: 16px; }
+                .big { font-weight: bold; font-size: 14px; }
+            </style></head><body>
+                <h2 class="c">${escapeHtml(TOKO.nama)}</h2>
+                <div class="c">${escapeHtml(TOKO.alamat)}</div>
+                <div class="c">Telp: ${escapeHtml(TOKO.telp)}</div>
+                ${garis}
+                <div class="row"><span>${escapeHtml(trx.id)}</span><span>${formatTanggal(trx.waktu)}</span></div>
+                ${garis}
+                ${rows}
+                ${garis}
+                <div class="row big"><span>TOTAL</span><span>${formatRupiah(trx.total)}</span></div>
+                <div class="row"><span>TUNAI</span><span>${formatRupiah(trx.bayar)}</span></div>
+                <div class="row"><span>KEMBALIAN</span><span>${formatRupiah(trx.kembalian)}</span></div>
+                ${garis}
+                <div class="c">${escapeHtml(TOKO.footer)}</div>
+            </body></html>`);
+            w.document.close();
+            setTimeout(() => { w.focus(); w.print(); }, 400);
+        }
+
+        function cetakUlangStruk(i) {
+            if (cacheTransaksi[i]) cetakStruk(cacheTransaksi[i]);
+        }
+
+        // ================== ADMIN ==================
+        function bukaAdmin() {
+            const pin = prompt('Masukkan PIN Admin:');
+            if (pin === null) return;
+            if (pin !== ADMIN_PIN) return toast('PIN salah!', 'error');
+            document.getElementById('adminPanel').classList.remove('hidden');
+            gantiTab('barang');
+            loadListAdmin();
+        }
+
+        function tutupAdmin() {
+            tutupScannerAdmin();
+            document.getElementById('adminPanel').classList.add('hidden');
+        }
+
+        function gantiTab(tab) {
+            const barang = document.getElementById('tabBarang');
+            const transaksi = document.getElementById('tabTransaksi');
+            const btnB = document.getElementById('tabBtnBarang');
+            const btnT = document.getElementById('tabBtnTransaksi');
+            const aktif = 'flex-1 py-2 text-sm font-bold border-b-2 border-red-600 text-red-600';
+            const nonaktif = 'flex-1 py-2 text-sm font-bold border-b-2 border-transparent text-gray-500 hover:text-gray-700';
+            if (tab === 'barang') {
+                barang.classList.remove('hidden');
+                transaksi.classList.add('hidden');
+                btnB.className = aktif; btnT.className = nonaktif;
+            } else {
+                transaksi.classList.remove('hidden');
+                barang.classList.add('hidden');
+                btnT.className = aktif; btnB.className = nonaktif;
+                loadTransaksi();
+            }
+        }
 
         async function loadListAdmin() {
             const divList = document.getElementById('listBarangAdmin');
-            divList.innerHTML = "<p>Loading...</p>";
+            divList.innerHTML = '<p class="text-center text-gray-400 py-3">Memuat data...</p>';
             try {
-                const querySnapshot = await window.firestoreGetDocs(window.firestoreCollection(window.db, 'barang'));
-                divList.innerHTML = "";
-                querySnapshot.forEach((doc) => {
-                    const data = doc.data();
-                    divList.innerHTML += `
-                        <div class="flex justify-between bg-gray-50 p-2 border-b text-sm">
-                            <span>${data.nama} (${doc.id})</span>
-                            <span class="font-bold">${formatRupiah(data.harga)}</span>
-                        </div>
-                    `;
-                });
-            } catch(e) {
-                divList.innerHTML = "<p>Gagal memuat data.</p>";
+                const snap = await window.fs.getDocs(window.fs.collection(window.db, 'barang'));
+                cacheBarang = [];
+                snap.forEach(d => cacheBarang.push({ id: d.id, ...d.data() }));
+                cacheBarang.sort((a, b) => (a.nama || '').localeCompare(b.nama || ''));
+                renderListAdmin();
+            } catch (e) {
+                divList.innerHTML = '<p class="text-center text-red-500 py-3">Gagal memuat: ' + escapeHtml(e.message) + '</p>';
             }
         }
+
+        function renderListAdmin() {
+            const divList = document.getElementById('listBarangAdmin');
+            const f = (document.getElementById('cariBarang').value || '').toLowerCase();
+            const data = cacheBarang
+                .map((b, i) => ({ b, i }))
+                .filter(({ b }) => !f || (b.nama || '').toLowerCase().includes(f) || b.id.toLowerCase().includes(f));
+
+            document.getElementById('jmlBarang').textContent = data.length;
+
+            if (data.length === 0) {
+                divList.innerHTML = '<p class="text-center text-gray-400 py-3">Tidak ada barang.</p>';
+                return;
+            }
+
+            divList.innerHTML = data.map(({ b, i }) => {
+                const stokTxt = (b.stok === null || b.stok === undefined) ? '∞' : b.stok;
+                return `
+                <div class="flex justify-between items-center bg-white border rounded-lg p-2.5 mb-1.5">
+                    <div class="min-w-0">
+                        <div class="font-semibold text-sm text-gray-800 truncate">${escapeHtml(b.nama)}</div>
+                        <div class="text-xs text-gray-400">${escapeHtml(b.id)} • Stok: ${stokTxt}</div>
+                    </div>
+                    <div class="flex items-center gap-1.5 ml-2">
+                        <span class="font-bold text-sm">${formatRupiah(b.harga)}</span>
+                        <button onclick="isiFormEdit(${i})" title="Edit" class="bg-blue-100 text-blue-600 w-7 h-7 rounded-full text-xs hover:bg-blue-200">✏️</button>
+                        <button onclick="hapusBarangDb(${i})" title="Hapus" class="bg-red-100 text-red-600 w-7 h-7 rounded-full text-xs hover:bg-red-200">🗑️</button>
+                    </div>
+                </div>`;
+            }).join('');
+        }
+
+        function isiFormEdit(i) {
+            const b = cacheBarang[i];
+            editBarcode = b.id;
+            const bc = document.getElementById('inputBarcode');
+            bc.value = b.id;
+            bc.readOnly = true;
+            bc.classList.add('bg-gray-100');
+            document.getElementById('inputNama').value = b.nama || '';
+            document.getElementById('inputHarga').value = (b.harga || 0).toLocaleString('id-ID');
+            document.getElementById('inputStok').value = (b.stok === null || b.stok === undefined) ? '' : b.stok;
+            document.getElementById('btnSimpanBarang').textContent = 'UPDATE BARANG';
+            document.getElementById('btnBatalEdit').classList.remove('hidden');
+            document.getElementById('inputNama').focus();
+        }
+
+        function batalEdit() {
+            editBarcode = null;
+            const bc = document.getElementById('inputBarcode');
+            bc.readOnly = false;
+            bc.classList.remove('bg-gray-100');
+            document.getElementById('btnSimpanBarang').textContent = 'SIMPAN BARANG';
+            document.getElementById('btnBatalEdit').classList.add('hidden');
+        }
+
+        async function simpanBarang() {
+            const bcInput = document.getElementById('inputBarcode');
+            const barcode = bcInput.value.trim();
+            const nama = document.getElementById('inputNama').value.trim();
+            const harga = parseInt((document.getElementById('inputHarga').value || '').replace(/\D/g, '')) || 0;
+            const stokRaw = document.getElementById('inputStok').value.trim();
+            const stok = stokRaw === '' ? null : Math.max(0, parseInt(stokRaw) || 0);
+
+            if (!barcode) return toast('Barcode wajib diisi!', 'error');
+            if (!nama) return toast('Nama barang wajib diisi!', 'error');
+            if (harga <= 0) return toast('Harga harus lebih dari 0!', 'error');
+
+            const btn = document.getElementById('btnSimpanBarang');
+            btn.disabled = true;
+            btn.textContent = 'Menyimpan...';
+            try {
+                await window.fs.setDoc(window.fs.doc(window.db, 'barang', barcode), { nama, harga, stok });
+                toast(editBarcode ? 'Barang berhasil diupdate!' : 'Barang baru berhasil disimpan!');
+                bcInput.value = '';
+                document.getElementById('inputNama').value = '';
+                document.getElementById('inputHarga').value = '';
+                document.getElementById('inputStok').value = '';
+                batalEdit();
+                loadListAdmin();
+            } catch (error) {
+                toast('Gagal simpan: ' + error.message, 'error');
+            } finally {
+                btn.disabled = false;
+                btn.textContent = 'SIMPAN BARANG';
+            }
+        }
+
+        async function hapusBarangDb(i) {
+            const b = cacheBarang[i];
+            if (!confirm(`Hapus "${b.nama}" dari database?`)) return;
+            try {
+                await window.fs.deleteDoc(window.fs.doc(window.db, 'barang', b.id));
+                toast('Barang dihapus.');
+                loadListAdmin();
+            } catch (e) {
+                toast('Gagal hapus: ' + e.message, 'error');
+            }
+        }
+
+        async function loadTransaksi() {
+            const div = document.getElementById('listTransaksi');
+            div.innerHTML = '<p class="text-center text-gray-400 py-3">Memuat riwayat...</p>';
+            try {
+                const q = window.fs.query(
+                    window.fs.collection(window.db, 'transaksi'),
+                    window.fs.orderBy('waktu', 'desc'),
+                    window.fs.limit(30)
+                );
+                const snap = await window.fs.getDocs(q);
+                cacheTransaksi = [];
+                snap.forEach(d => cacheTransaksi.push(d.data()));
+
+                if (cacheTransaksi.length === 0) {
+                    div.innerHTML = '<p class="text-center text-gray-400 py-3">Belum ada transaksi.</p>';
+                    return;
+                }
+
+                div.innerHTML = cacheTransaksi.map((t, i) => {
+                    const items = t.items || [];
+                    return `
+                    <details class="bg-white border rounded-lg mb-2 overflow-hidden">
+                        <summary class="p-3 cursor-pointer flex justify-between items-center hover:bg-gray-50">
+                            <div>
+                                <div class="text-sm font-semibold text-gray-800">${formatTanggal(t.waktu)}</div>
+                                <div class="text-xs text-gray-400">${escapeHtml(t.id)} • ${items.length} jenis barang</div>
+                            </div>
+                            <span class="font-bold text-red-600 text-sm">${formatRupiah(t.total)}</span>
+                        </summary>
+                        <div class="px-3 pb-3 border-t pt-2">
+                            ${items.map(it => `
+                                <div class="flex justify-between text-xs py-0.5">
+                                    <span>${escapeHtml(it.nama)} × ${it.qty}</span>
+                                    <span>${formatRupiah(it.harga * it.qty)}</span>
+                                </div>`).join('')}
+                            <div class="flex justify-between text-xs font-semibold border-t mt-1 pt-1"><span>Bayar</span><span>${formatRupiah(t.bayar)}</span></div>
+                            <div class="flex justify-between text-xs font-semibold"><span>Kembali</span><span>${formatRupiah(t.kembalian)}</span></div>
+                            <button onclick="cetakUlangStruk(${i})" class="mt-2 w-full bg-blue-500 text-white text-xs py-1.5 rounded-lg hover:bg-blue-600">🖨️ Cetak Ulang Struk</button>
+                        </div>
+                    </details>`;
+                }).join('');
+            } catch (e) {
+                div.innerHTML = '<p class="text-center text-red-500 py-3">Gagal memuat: ' + escapeHtml(e.message) + '</p>';
+            }
+        }
+
+        // ================== EVENT LISTENER ==================
+        document.getElementById('manualBarcode').addEventListener('keydown', e => {
+            if (e.key === 'Enter') cariBarangManual();
+        });
+        document.getElementById('inputBarcode').addEventListener('keydown', e => {
+            if (e.key === 'Enter') document.getElementById('inputNama').focus();
+        });
+        document.getElementById('inputNama').addEventListener('keydown', e => {
+            if (e.key === 'Enter') document.getElementById('inputHarga').focus();
+        });
+        document.getElementById('inputHarga').addEventListener('keydown', e => {
+            if (e.key === 'Enter') document.getElementById('inputStok').focus();
+        });
+        document.getElementById('inputStok').addEventListener('keydown', e => {
+            if (e.key === 'Enter') simpanBarang();
+        });
+
+        // Format ribuan otomatis
+        document.getElementById('inputHarga').addEventListener('input', function () {
+            const v = this.value.replace(/\D/g, '');
+            this.value = v ? Number(v).toLocaleString('id-ID') : '';
+        });
+        document.getElementById('inputBayar').addEventListener('input', function () {
+            const v = this.value.replace(/\D/g, '');
+            this.value = v ? Number(v).toLocaleString('id-ID') : '';
+            updateKembalian();
+        });
+        document.getElementById('inputBayar').addEventListener('keydown', e => {
+            if (e.key === 'Enter') konfirmasiBayar();
+        });
+
+        // ================== INISIALISASI ==================
+        document.querySelector('header h1').textContent = TOKO.nama;
+        muatKeranjang();
     </script>
 </body>
 </html>
