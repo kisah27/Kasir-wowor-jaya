@@ -1,0 +1,329 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Kasir WOWOR-JAYA</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/html5-qrcode" type="text/javascript"></script>
+    <!-- Load Firebase dari CDN -->
+    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-auth-compat.js"></script>
+    <style>
+        body { font-family: 'Arial', sans-serif; }
+        #reader, #readerAdmin { width: 100%; }
+        #reader video, #readerAdmin video { border-radius: 8px; }
+    </style>
+</head>
+<body class="bg-gray-100">
+
+    <div class="max-w-md mx-auto bg-gray-50 min-h-screen flex flex-col shadow-lg relative">
+        
+        <!-- Header -->
+        <header class="bg-red-600 text-white p-4 shadow-md flex justify-between items-center">
+            <div>
+                <h1 class="text-xl font-bold tracking-wider">WOWOR-JAYA</h1>
+                <p id="jamDigital" class="text-xs text-red-100 font-mono mt-1">--:--:--</p>
+            </div>
+            <div class="flex gap-2">
+                <button onclick="bukaScanner()" class="bg-white text-red-600 p-2 rounded-full hover:bg-gray-100 transition" title="Scan Barang Kasir">
+                    <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h2m4 0h2m4 0h2M4 12h16M4 18h2m4 0h2m4 0h2M4 4v4m0 8v4M20 4v4m0 8v4" /></svg>
+                </button>
+                <button onclick="bukaAdmin()" class="bg-white text-red-600 p-2 rounded-full hover:bg-gray-100 transition" title="Admin Panel">
+                    <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" /><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /></svg>
+                </button>
+            </div>
+        </header>
+
+        <!-- Panel Admin (Hidden) -->
+        <div id="adminPanel" class="hidden absolute inset-0 bg-white z-50 p-4 overflow-y-auto">
+            <div class="flex justify-between items-center mb-4">
+                <h2 class="text-xl font-bold text-gray-800">Admin: Input Barang</h2>
+                <button onclick="tutupAdmin()" class="text-red-600 font-bold">TUTUP X</button>
+            </div>
+            
+            <div class="bg-gray-100 p-4 rounded-lg mb-4">
+                <!-- Tombol Scan untuk Admin -->
+                <button onclick="bukaScannerAdmin()" class="w-full bg-blue-600 text-white py-2 rounded-lg font-bold mb-3 flex items-center justify-center gap-2">
+                    <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h2m4 0h2m4 0h2M4 12h16M4 18h2m4 0h2m4 0h2M4 4v4m0 8v4M20 4v4m0 8v4" /></svg>
+                    Scan Barcode via Kamera
+                </button>
+                
+                <!-- Area Kamera Admin -->
+                <div id="scannerAdminContainer" class="hidden mb-4">
+                    <div id="readerAdmin"></div>
+                    <button onclick="tutupScannerAdmin()" class="w-full mt-2 bg-red-500 text-white py-1 rounded text-sm">Tutup Kamera</button>
+                </div>
+
+                <input type="text" id="inputBarcode" placeholder="Hasil scan/Ketik Barcode" class="w-full border p-2 rounded mb-2"><br>
+                <input type="text" id="inputNama" placeholder="Nama Barang" class="w-full border p-2 rounded mb-2"><br>
+                <input type="number" id="inputHarga" placeholder="Harga (misal: 5000)" class="w-full border p-2 rounded mb-2"><br>
+                <button onclick="simpanBarang()" class="w-full bg-green-500 text-white py-2 rounded-lg font-bold">SIMPAN KE FIREBASE</button>
+            </div>
+            <h3 class="font-bold mb-2">Daftar Barang di Database:</h3>
+            <div id="listBarangAdmin"></div>
+        </div>
+
+        <!-- Area Scanner Kasir -->
+        <div id="scannerContainer" class="hidden p-4 bg-gray-800">
+            <div id="reader"></div>
+            <button onclick="tutupScanner()" class="w-full mt-4 bg-red-500 text-white py-2 rounded-lg font-semibold hover:bg-red-600">Tutup Scanner</button>
+        </div>
+
+        <!-- Input Manual Kasir -->
+        <div class="p-4 bg-white border-b flex gap-2">
+            <input type="text" id="manualBarcode" placeholder="Ketik barcode manual..." class="flex-1 border rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-red-500">
+            <button onclick="cariBarangManual()" class="bg-blue-500 text-white px-4 rounded-lg hover:bg-blue-600 font-semibold">Cari</button>
+        </div>
+
+        <!-- Daftar Keranjang Belanja -->
+        <div class="flex-1 overflow-y-auto p-4">
+            <h2 class="text-lg font-semibold text-gray-700 mb-3">Daftar Belanja</h2>
+            <div id="keranjangList">
+                <p class="text-gray-400 text-center mt-10">Keranjang kosong. Silakan scan barang.</p>
+            </div>
+        </div>
+
+        <!-- Total & Checkout -->
+        <footer class="bg-white p-4 shadow-[0_-4px_10px_rgba(0,0,0,0.1)]">
+            <div class="flex justify-between items-center mb-4">
+                <span class="text-gray-600 font-medium">Total Belanja:</span>
+                <span id="totalHarga" class="text-2xl font-bold text-red-600">Rp 0</span>
+            </div>
+            <button onclick="checkout()" class="w-full bg-green-500 text-white py-3 rounded-lg font-bold text-lg hover:bg-green-600 transition">Bayar</button>
+            <button onclick="kosongkanKeranjang()" class="w-full mt-2 text-gray-500 py-2 rounded-lg hover:bg-gray-100 text-sm">Kosongkan Keranjang</button>
+        </footer>
+    </div>
+
+    <script>
+        // === KONFIGURASI FIREBASE (GANTI DENGAN MILIK ANDA) ===
+        const firebaseConfig = {
+            apiKey: "AIzaSyXXXXXXXXXXXXXXXXXXXXX",
+            authDomain: "kasir-xxxx.firebaseapp.com",
+            projectId: "kasir-xxxx",
+            storageBucket: "kasir-xxxx.appspot.com",
+            messagingSenderId: "123456789",
+            appId: "1:123456789:web:abcdef"
+        };
+        
+        // Inisialisasi Firebase
+        firebase.initializeApp(firebaseConfig);
+        const db = firebase.firestore();
+        const auth = firebase.auth();
+
+        let keranjang = [];
+        let html5QrCodeKasir;
+        let html5QrCodeAdmin;
+
+        // Login Anonim (Wajib agar bisa akses database)
+        auth.signInAnonymously().catch(error => console.error("Auth Error:", error));
+
+        // Format Rupiah
+        function formatRupiah(angka) {
+            return "Rp " + angka.toLocaleString('id-ID');
+        }
+
+        // === FUNGSI JAM DIGITAL ===
+        function updateJam() {
+            const now = new Date();
+            const jam = now.getHours().toString().padStart(2, '0');
+            const menit = now.getMinutes().toString().padStart(2, '0');
+            const detik = now.getSeconds().toString().padStart(2, '0');
+            document.getElementById('jamDigital').textContent = `${jam}:${menit}:${detik}`;
+        }
+        setInterval(updateJam, 1000); 
+        updateJam(); 
+
+        // === FUNGSI SCANNER KASIR (Untuk jualan) ===
+        function bukaScanner() {
+            document.getElementById('scannerContainer').classList.remove('hidden');
+            html5QrCodeKasir = new Html5Qrcode("reader");
+            html5QrCodeKasir.start(
+                { facingMode: "environment" },
+                { fps: 10, qrbox: { width: 250, height: 150 } },
+                (decodedText) => {
+                    prosesBarcode(decodedText);
+                    tutupScanner();
+                },
+                () => {}
+            ).catch(err => alert("Gagal akses kamera: " + err));
+        }
+
+        function tutupScanner() {
+            if (html5QrCodeKasir) {
+                html5QrCodeKasir.stop().then(() => html5QrCodeKasir.clear()).catch(err => console.error(err));
+            }
+            document.getElementById('scannerContainer').classList.add('hidden');
+        }
+
+        // === FUNGSI SCANNER ADMIN (Untuk input barang baru) ===
+        function bukaScannerAdmin() {
+            document.getElementById('scannerAdminContainer').classList.remove('hidden');
+            html5QrCodeAdmin = new Html5Qrcode("readerAdmin");
+            html5QrCodeAdmin.start(
+                { facingMode: "environment" },
+                { fps: 10, qrbox: { width: 250, height: 150 } },
+                (decodedText) => {
+                    // Hasil scan langsung masuk ke input barcode
+                    document.getElementById('inputBarcode').value = decodedText;
+                    tutupScannerAdmin();
+                    // Langsung fokus ke input nama barang agar cepat
+                    document.getElementById('inputNama').focus();
+                },
+                () => {}
+            ).catch(err => alert("Gagal akses kamera: " + err));
+        }
+
+        function tutupScannerAdmin() {
+            if (html5QrCodeAdmin) {
+                html5QrCodeAdmin.stop().then(() => html5QrCodeAdmin.clear()).catch(err => console.error(err));
+            }
+            document.getElementById('scannerAdminContainer').classList.add('hidden');
+        }
+
+        // === FUNGSI CARI BARANG KE FIREBASE ===
+        async function prosesBarcode(barcode) {
+            try {
+                const docRef = db.collection('barang').doc(barcode);
+                const doc = await docRef.get();
+                
+                if (doc.exists) {
+                    const barangDitemukan = doc.data();
+                    const itemDiKeranjang = keranjang.find(item => item.barcode === barcode);
+                    
+                    if (itemDiKeranjang) {
+                        itemDiKeranjang.qty += 1;
+                    } else {
+                        keranjang.push({
+                            barcode: barcode,
+                            nama: barangDitemukan.nama,
+                            harga: barangDitemukan.harga,
+                            qty: 1
+                        });
+                    }
+                    tampilKeranjang();
+                } else {
+                    alert("Barang dengan barcode " + barcode + " tidak ada di database!\nSilakan buka Admin untuk menambahkan.");
+                }
+            } catch (error) {
+                alert("Error mengambil data: " + error);
+            }
+        }
+
+        function cariBarangManual() {
+            const barcode = document.getElementById('manualBarcode').value;
+            if (barcode) {
+                prosesBarcode(barcode);
+                document.getElementById('manualBarcode').value = "";
+            }
+        }
+
+        // === FUNGSI TAMPIL KERANJANG ===
+        function tampilKeranjang() {
+            const list = document.getElementById('keranjangList');
+            list.innerHTML = "";
+            if (keranjang.length === 0) {
+                list.innerHTML = '<p class="text-gray-400 text-center mt-10">Keranjang kosong. Silakan scan barang.</p>';
+                document.getElementById('totalHarga').innerText = formatRupiah(0);
+                return;
+            }
+            keranjang.forEach((item, index) => {
+                const subtotal = item.harga * item.qty;
+                const div = document.createElement('div');
+                div.className = "flex justify-between items-center bg-white p-3 mb-2 rounded-lg shadow-sm border";
+                div.innerHTML = `
+                    <div class="flex-1">
+                        <h3 class="font-semibold text-gray-800">${item.nama}</h3>
+                        <p class="text-sm text-gray-500">${formatRupiah(item.harga)} x ${item.qty}</p>
+                    </div>
+                    <div class="flex items-center gap-2">
+                        <span class="font-bold text-gray-800 mr-2">${formatRupiah(subtotal)}</span>
+                        <button onclick="kurangQty(${index})" class="bg-gray-200 w-7 h-7 rounded-full font-bold hover:bg-gray-300">-</button>
+                        <button onclick="tambahQty(${index})" class="bg-gray-200 w-7 h-7 rounded-full font-bold hover:bg-gray-300">+</button>
+                        <button onclick="hapusBarang(${index})" class="bg-red-100 text-red-600 w-7 h-7 rounded-full font-bold hover:bg-red-200">X</button>
+                    </div>
+                `;
+                list.appendChild(div);
+            });
+            hitungTotal();
+        }
+
+        function tambahQty(i) { keranjang[i].qty += 1; tampilKeranjang(); }
+        function kurangQty(i) {
+            if (keranjang[i].qty > 1) keranjang[i].qty -= 1;
+            else keranjang.splice(i, 1);
+            tampilKeranjang();
+        }
+        function hapusBarang(i) { keranjang.splice(i, 1); tampilKeranjang(); }
+
+        function hitungTotal() {
+            let total = keranjang.reduce((acc, item) => acc + (item.harga * item.qty), 0);
+            document.getElementById('totalHarga').innerText = formatRupiah(total);
+        }
+
+        function kosongkanKeranjang() {
+            if (confirm("Yakin mengosongkan keranjang?")) {
+                keranjang = [];
+                tampilKeranjang();
+            }
+        }
+
+        function checkout() {
+            if (keranjang.length === 0) return alert("Keranjang kosong!");
+            let total = keranjang.reduce((acc, item) => acc + (item.harga * item.qty), 0);
+            alert("Transaksi Berhasil!\n\nTotal: " + formatRupiah(total) + "\n\nCetak struk...");
+            kosongkanKeranjang();
+        }
+
+        // === FUNGSI ADMIN PANEL ===
+        function bukaAdmin() { document.getElementById('adminPanel').classList.remove('hidden'); loadListAdmin(); }
+        function tutupAdmin() { 
+            tutupScannerAdmin(); // Tutup kamera jika sedang terbuka
+            document.getElementById('adminPanel').classList.add('hidden'); 
+        }
+
+        async function simpanBarang() {
+            const barcode = document.getElementById('inputBarcode').value;
+            const nama = document.getElementById('inputNama').value;
+            const harga = parseInt(document.getElementById('inputHarga').value);
+
+            if (!barcode || !nama || !harga) return alert("Semua kolom wajib diisi!");
+
+            try {
+                await db.collection('barang').doc(barcode).set({
+                    nama: nama,
+                    harga: harga
+                });
+                alert("Barang berhasil disimpan ke Firebase!");
+                document.getElementById('inputBarcode').value = "";
+                document.getElementById('inputNama').value = "";
+                document.getElementById('inputHarga').value = "";
+                loadListAdmin();
+            } catch (error) {
+                alert("Gagal simpan: " + error);
+            }
+        }
+
+        async function loadListAdmin() {
+            const divList = document.getElementById('listBarangAdmin');
+            divList.innerHTML = "<p>Loading...</p>";
+            try {
+                const snapshot = await db.collection('barang').get();
+                divList.innerHTML = "";
+                snapshot.forEach(doc => {
+                    const data = doc.data();
+                    divList.innerHTML += `
+                        <div class="flex justify-between bg-gray-50 p-2 border-b text-sm">
+                            <span>${data.nama} (${doc.id})</span>
+                            <span class="font-bold">${formatRupiah(data.harga)}</span>
+                        </div>
+                    `;
+                });
+            } catch(e) {
+                divList.innerHTML = "<p>Gagal memuat data.</p>";
+            }
+        }
+    </script>
+</body>
+</html>
