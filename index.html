@@ -64,8 +64,11 @@
                         </div>
 
                         <input type="text" id="inputBarcode" placeholder="Hasil scan / Ketik Barcode" class="w-full border p-2 rounded mb-1">
-                        <div id="statusNamaOtomatis" class="text-xs mb-2 hidden"></div>
-                        <button onclick="klikCariNama()" class="w-full bg-indigo-500 text-white py-1.5 rounded text-sm font-semibold mb-2 hover:bg-indigo-600">🔍 Cari Nama Produk Otomatis</button>
+                        <div id="statusNamaOtomatis" class="hidden mb-2"></div>
+                        <div class="flex gap-2 mb-2">
+                            <button onclick="klikCariNama()" class="flex-1 bg-indigo-500 text-white py-1.5 rounded text-sm font-semibold hover:bg-indigo-600">🔍 Cari Nama Otomatis</button>
+                            <button onclick="testKoneksiNama()" class="bg-gray-200 text-gray-700 px-3 py-1.5 rounded text-sm font-semibold hover:bg-gray-300" title="Tes apakah koneksi ke server nama produk berfungsi">📶 Tes</button>
+                        </div>
 
                         <input type="text" id="inputNama" placeholder="Nama Barang (otomatis / manual)" class="w-full border p-2 rounded mb-2">
                         <input type="text" id="inputHarga" inputmode="numeric" placeholder="Harga (misal: 5000)" class="w-full border p-2 rounded mb-2">
@@ -74,7 +77,10 @@
                         <button id="btnBatalEdit" onclick="batalEdit()" class="hidden w-full mt-2 bg-gray-300 text-gray-700 py-1.5 rounded-lg text-sm font-semibold">Batal Edit</button>
                     </div>
 
-                    <h3 class="font-bold mb-2">Daftar Barang (<span id="jmlBarang">0</span>)</h3>
+                    <div class="flex justify-between items-center mb-2">
+                        <h3 class="font-bold">Daftar Barang (<span id="jmlBarang">0</span>)</h3>
+                        <button onclick="lengkapiNamaOtomatis()" class="bg-purple-600 text-white px-2.5 py-1 rounded text-xs font-semibold hover:bg-purple-700">🤖 Isi Nama Otomatis Semua</button>
+                    </div>
                     <input type="text" id="cariBarang" placeholder="Cari nama / barcode..." class="w-full border p-2 rounded mb-2" oninput="renderListAdmin()">
                     <div id="listBarangAdmin"></div>
                 </div>
@@ -144,15 +150,16 @@
             </div>
         </div>
 
-        <!-- MODAL TAMBAH CEPAT (barang belum ada di database) -->
+        <!-- MODAL TAMBAH CEPAT (barang belum ada / belum bernama) -->
         <div id="modalQuickAdd" class="hidden absolute inset-0 bg-black/60 z-[60] flex items-center justify-center p-4">
             <div class="bg-white rounded-2xl w-full max-w-sm p-5">
                 <div class="flex justify-between items-center mb-2">
-                    <h3 class="text-lg font-bold text-gray-800">Tambah Barang Baru</h3>
+                    <h3 id="qaTitle" class="text-lg font-bold text-gray-800">Tambah Barang Baru</h3>
                     <button onclick="tutupQuickAdd()" class="text-gray-400 hover:text-gray-600 text-2xl font-bold leading-none">&times;</button>
                 </div>
                 <p class="text-xs text-gray-400 mb-3">Barcode: <span id="qaBarcode" class="font-mono font-semibold text-gray-600"></span></p>
-                <div id="qaStatus" class="text-xs mb-2 hidden"></div>
+                <div id="qaStatus" class="hidden mb-2"></div>
+                <button onclick="cariUlangNamaQA()" class="w-full bg-indigo-500 text-white py-1.5 rounded text-sm font-semibold mb-2 hover:bg-indigo-600">🔍 Cari Ulang Nama Otomatis</button>
                 <label class="text-sm text-gray-500">Nama Barang</label>
                 <input type="text" id="qaNama" placeholder="Nama produk..." class="w-full border p-2 rounded mb-2">
                 <label class="text-sm text-gray-500">Harga Jual <span class="text-red-500">*</span></label>
@@ -244,12 +251,17 @@
             }, 2500);
         }
 
+        // Kotak status yang jelas terlihat (admin & modal)
         function setStatusEl(id, pesan, tipe) {
             const el = document.getElementById(id);
             if (!pesan) { el.classList.add('hidden'); return; }
+            const styles = {
+                load: 'bg-blue-50 text-blue-700 border border-blue-200',
+                ok: 'bg-green-50 text-green-700 border border-green-200',
+                error: 'bg-red-50 text-red-700 border border-red-200'
+            };
+            el.className = 'mb-2 text-xs font-medium px-2.5 py-2 rounded-lg ' + (styles[tipe] || styles.load);
             el.textContent = pesan;
-            el.className = 'text-xs mb-2 font-medium ' +
-                (tipe === 'error' ? 'text-red-600' : tipe === 'load' ? 'text-gray-500' : 'text-green-600');
         }
 
         function beep(freq = 1100, durasi = 80, tipe = 'square', volume = 0.08) {
@@ -276,19 +288,19 @@
         updateJam();
 
         // ================== CARI NAMA PRODUK ONLINE ==================
-        const API_SOURCES = [
-            b => `https://world.openfoodfacts.org/api/v2/product/${encodeURIComponent(b)}.json?fields=product_name,product_name_id,brands,quantity`,
-            b => `https://world.openproductsfacts.org/api/v2/product/${encodeURIComponent(b)}.json?fields=product_name,brands,quantity`
-        ];
-
-        async function fetchJson(url, ms = 6000) {
+        // 4 sumber dicari BERSAMAAN, yang paling cepat menemukan nama yang dipakai
+        async function fetchJson(url, ms = 8000) {
             const ctrl = new AbortController();
             const t = setTimeout(() => ctrl.abort(), ms);
             try {
+                console.log('[Lookup] Mencoba:', url);
                 const res = await fetch(url, { signal: ctrl.signal });
-                if (!res.ok) return null;
+                if (!res.ok) { console.log('[Lookup] HTTP', res.status); return null; }
                 return await res.json();
-            } catch (e) { return null; }
+            } catch (e) {
+                console.log('[Lookup] Gagal:', e.message);
+                return null;
+            }
             finally { clearTimeout(t); }
         }
 
@@ -303,15 +315,29 @@
             return parts.join(' ');
         }
 
-        async function cariNamaProdukOnline(barcode) {
-            for (const build of API_SOURCES) {
-                const data = await fetchJson(build(barcode));
-                if (data && data.status === 1 && data.product) {
-                    const nama = formatNamaProduk(data.product);
-                    if (nama) return nama;
-                }
-            }
-            return null;
+        function cariNamaProdukOnline(barcode) {
+            const b = encodeURIComponent(String(barcode).trim());
+            const urls = [
+                `https://world.openfoodfacts.org/api/v2/product/${b}.json?fields=product_name,product_name_id,brands,quantity`,
+                `https://world.openfoodfacts.org/api/v0/product/${b}.json`,
+                `https://world.openproductsfacts.org/api/v2/product/${b}.json?fields=product_name,brands,quantity`,
+                `https://world.openbeautyfacts.org/api/v2/product/${b}.json?fields=product_name,brands,quantity`
+            ];
+            return new Promise(resolve => {
+                let sisa = urls.length, selesai = false, online = false;
+                const cobaSelesai = () => {
+                    if (!selesai && sisa === 0) { selesai = true; resolve({ nama: null, online }); }
+                };
+                urls.forEach(url => {
+                    fetchJson(url).then(data => {
+                        if (selesai) return;
+                        if (data) online = true; // server merespon (walau produk tidak ada)
+                        const nama = (data && data.status === 1 && data.product) ? formatNamaProduk(data.product) : null;
+                        if (nama) { selesai = true; resolve({ nama, online: true }); }
+                        else { sisa--; cobaSelesai(); }
+                    }).catch(() => { if (!selesai) { sisa--; cobaSelesai(); } });
+                });
+            });
         }
 
         // ================== SCANNER KASIR ==================
@@ -357,7 +383,7 @@
                     (decodedText) => {
                         document.getElementById('inputBarcode').value = decodedText;
                         tutupScannerAdmin();
-                        isiNamaOtomatis(decodedText); // ⬅️ nama dicari otomatis
+                        isiNamaOtomatis(decodedText); // nama dicari otomatis
                     },
                     () => {}
                 );
@@ -406,10 +432,20 @@
                 const snap = await window.fs.getDoc(window.fs.doc(window.db, 'barang', barcode));
                 if (!snap.exists()) {
                     beep(220, 220, 'sawtooth');
-                    bukaQuickAdd(barcode); // ⬅️ buka dialog tambah cepat, nama dicari otomatis
+                    bukaQuickAdd(barcode); // barang baru → dialog + cari nama otomatis
                     return;
                 }
                 const data = snap.data();
+
+                // ⬅️ BARU: jika barang ada tapi namanya masih kosong / masih angka barcode,
+                // buka dialog pengisian nama + cari otomatis
+                const namaDb = (data.nama || '').trim();
+                if (!namaDb || namaDb === barcode || /^\d+$/.test(namaDb)) {
+                    beep(220, 220, 'sawtooth');
+                    bukaQuickAdd(barcode, data);
+                    return;
+                }
+
                 const stok = (data.stok === undefined || data.stok === null) ? null : Number(data.stok);
                 const existing = keranjang.find(it => it.barcode === barcode);
 
@@ -508,28 +544,38 @@
             }
         }
 
-        // ================== TAMBAH CEPAT (BARANG BARU) ==================
-        async function bukaQuickAdd(barcode) {
+        // ================== TAMBAH CEPAT (BARANG BARU / BELUM BERNAMA) ==================
+        async function bukaQuickAdd(barcode, existingData) {
             quickAddBarcode = barcode;
             document.getElementById('qaBarcode').textContent = barcode;
             document.getElementById('qaNama').value = '';
-            document.getElementById('qaHarga').value = '';
-            document.getElementById('qaStok').value = '';
-            setStatusEl('qaStatus', '🔎 Mencari nama produk di internet...', 'load');
+            document.getElementById('qaHarga').value = existingData && existingData.harga ? existingData.harga.toLocaleString('id-ID') : '';
+            document.getElementById('qaStok').value = (existingData && existingData.stok !== null && existingData.stok !== undefined) ? existingData.stok : '';
+            document.getElementById('qaTitle').textContent = existingData ? 'Lengkapi Nama Barang' : 'Tambah Barang Baru';
             document.getElementById('modalQuickAdd').classList.remove('hidden');
+            jalankanLookupQA();
+        }
 
-            const nama = await cariNamaProdukOnline(barcode);
-            if (quickAddBarcode !== barcode) return; // modal sudah ditutup / berganti
+        async function jalankanLookupQA() {
+            if (!quickAddBarcode) return;
+            const barcode = quickAddBarcode;
+            setStatusEl('qaStatus', '🔎 Mencari nama produk di internet...', 'load');
+            const res = await cariNamaProdukOnline(barcode);
+            if (quickAddBarcode !== barcode) return; // modal sudah ditutup
 
-            if (nama) {
-                document.getElementById('qaNama').value = nama;
+            if (res.nama) {
+                document.getElementById('qaNama').value = res.nama;
                 setStatusEl('qaStatus', '✅ Nama ditemukan otomatis! Tinggal isi harga.', 'ok');
                 document.getElementById('qaHarga').focus();
-            } else {
-                setStatusEl('qaStatus', 'Nama tidak ditemukan online. Ketik nama manual.', 'error');
+            } else if (res.online) {
+                setStatusEl('qaStatus', '❌ Barcode ini belum terdaftar di database produk online. Ketik nama manual.', 'error');
                 document.getElementById('qaNama').focus();
+            } else {
+                setStatusEl('qaStatus', '❌ Gagal terhubung ke internet. Cek koneksi, lalu tekan "Cari Ulang".', 'error');
             }
         }
+
+        function cariUlangNamaQA() { jalankanLookupQA(); }
 
         function tutupQuickAdd() {
             quickAddBarcode = null;
@@ -551,8 +597,12 @@
             try {
                 await window.fs.setDoc(window.fs.doc(window.db, 'barang', barcode), { nama, harga, stok });
                 const existing = keranjang.find(it => it.barcode === barcode);
-                if (existing) existing.qty += 1;
-                else keranjang.push({ barcode, nama, harga, stok, qty: 1 });
+                if (existing) {
+                    // sudah ada di keranjang → perbarui data (nama mungkin tadinya angka)
+                    existing.nama = nama; existing.harga = harga; existing.stok = stok;
+                } else {
+                    keranjang.push({ barcode, nama, harga, stok, qty: 1 });
+                }
                 tampilKeranjang();
                 tutupQuickAdd();
                 beep();
@@ -604,7 +654,7 @@
                 el.className = 'text-2xl font-bold text-green-600';
                 btn.disabled = false;
             } else {
-                el.textContent = 'Kurang ' + formatRupiah(total - bayak || (total - bayar));
+                el.textContent = 'Kurang ' + formatRupiah(total - bayar);
                 el.className = 'text-2xl font-bold text-red-600';
                 btn.disabled = true;
             }
@@ -743,16 +793,63 @@
                 if (!confirm('Mode edit: timpa nama barang dengan hasil pencarian online?')) return;
             }
             setStatusEl('statusNamaOtomatis', '🔎 Mencari nama produk di internet...', 'load');
-            const nama = await cariNamaProdukOnline(barcode);
-            // Abaikan hasil jika barcode di form sudah berganti
+            const res = await cariNamaProdukOnline(barcode);
             if (document.getElementById('inputBarcode').value.trim() !== barcode) return;
-            if (nama) {
-                document.getElementById('inputNama').value = nama;
-                setStatusEl('statusNamaOtomatis', '✅ Ditemukan: ' + nama, 'ok');
+
+            if (res.nama) {
+                document.getElementById('inputNama').value = res.nama;
+                setStatusEl('statusNamaOtomatis', '✅ Ditemukan: ' + res.nama, 'ok');
                 document.getElementById('inputHarga').focus();
-            } else {
-                setStatusEl('statusNamaOtomatis', '❌ Tidak ditemukan di database online. Isi nama manual.', 'error');
+            } else if (res.online) {
+                setStatusEl('statusNamaOtomatis', '❌ Barcode belum terdaftar di database online. Isi nama manual.', 'error');
                 document.getElementById('inputNama').focus();
+            } else {
+                setStatusEl('statusNamaOtomatis', '❌ Gagal koneksi internet. Cek koneksi lalu tekan "Cari Nama Otomatis" lagi.', 'error');
+            }
+        }
+
+        // --- Tes koneksi ke server nama produk ---
+        async function testKoneksiNama() {
+            setStatusEl('statusNamaOtomatis', '🔎 Menguji koneksi (barcode tes: Coca-Cola)...', 'load');
+            const res = await cariNamaProdukOnline('5449000000996');
+            if (res.nama) setStatusEl('statusNamaOtomatis', '✅ Koneksi OK! Contoh hasil: ' + res.nama, 'ok');
+            else setStatusEl('statusNamaOtomatis', '❌ Koneksi gagal. Pastikan internet aktif lalu coba lagi.', 'error');
+        }
+
+        // --- Isi nama otomatis untuk SEMUA barang yang namanya masih angka ---
+        async function lengkapiNamaOtomatis() {
+            const targets = cacheBarang.filter(b => !b.nama || b.nama.trim() === '' || b.nama === b.id || /^\d+$/.test(b.nama));
+            if (targets.length === 0) return toast('Semua barang sudah punya nama. 👍');
+            if (!confirm(`Cari nama online untuk ${targets.length} barang yang belum bernama?\nProses butuh internet & beberapa saat.`)) return;
+            let ok = 0, gagal = 0;
+            for (const b of targets) {
+                const res = await cariNamaProdukOnline(b.id);
+                if (res.nama) {
+                    try {
+                        await window.fs.setDoc(window.fs.doc(window.db, 'barang', b.id), { nama: res.nama }, { merge: true });
+                        ok++;
+                    } catch (e) { gagal++; }
+                } else gagal++;
+            }
+            toast(`Selesai: ${ok} nama terisi, ${gagal} tidak ditemukan/gagal.`);
+            loadListAdmin();
+        }
+
+        // --- Isi nama otomatis untuk SATU barang dari daftar ---
+        async function lookupNamaSatu(i) {
+            const b = cacheBarang[i];
+            toast('Mencari nama untuk barcode ' + b.id + '...', 'warn');
+            const res = await cariNamaProdukOnline(b.id);
+            if (res.nama) {
+                try {
+                    await window.fs.setDoc(window.fs.doc(window.db, 'barang', b.id), { nama: res.nama }, { merge: true });
+                    toast('Nama diupdate: ' + res.nama);
+                    loadListAdmin();
+                } catch (e) { toast('Gagal update: ' + e.message, 'error'); }
+            } else if (res.online) {
+                toast('Barcode ' + b.id + ' tidak ditemukan di database online.', 'warn');
+            } else {
+                toast('Gagal koneksi internet.', 'error');
             }
         }
 
@@ -786,14 +883,17 @@
 
             divList.innerHTML = data.map(({ b, i }) => {
                 const stokTxt = (b.stok === null || b.stok === undefined) ? '∞' : b.stok;
+                const belumBernama = !b.nama || b.nama === b.id || /^\d+$/.test(b.nama || '');
+                const badge = belumBernama ? '<span class="text-[10px] bg-amber-100 text-amber-700 px-1.5 py-0.5 rounded ml-1">belum bernama</span>' : '';
                 return `
                 <div class="flex justify-between items-center bg-white border rounded-lg p-2.5 mb-1.5">
                     <div class="min-w-0">
-                        <div class="font-semibold text-sm text-gray-800 truncate">${escapeHtml(b.nama)}</div>
+                        <div class="font-semibold text-sm text-gray-800 truncate">${escapeHtml(b.nama || b.id)}${badge}</div>
                         <div class="text-xs text-gray-400">${escapeHtml(b.id)} • Stok: ${stokTxt}</div>
                     </div>
                     <div class="flex items-center gap-1.5 ml-2">
                         <span class="font-bold text-sm">${formatRupiah(b.harga)}</span>
+                        <button onclick="lookupNamaSatu(${i})" title="Cari nama otomatis" class="bg-indigo-100 text-indigo-600 w-7 h-7 rounded-full text-xs hover:bg-indigo-200">🔍</button>
                         <button onclick="isiFormEdit(${i})" title="Edit" class="bg-blue-100 text-blue-600 w-7 h-7 rounded-full text-xs hover:bg-blue-200">✏️</button>
                         <button onclick="hapusBarangDb(${i})" title="Hapus" class="bg-red-100 text-red-600 w-7 h-7 rounded-full text-xs hover:bg-red-200">🗑️</button>
                     </div>
@@ -862,7 +962,7 @@
 
         async function hapusBarangDb(i) {
             const b = cacheBarang[i];
-            if (!confirm(`Hapus "${b.nama}" dari database?`)) return;
+            if (!confirm(`Hapus "${b.nama || b.id}" dari database?`)) return;
             try {
                 await window.fs.deleteDoc(window.fs.doc(window.db, 'barang', b.id));
                 toast('Barang dihapus.');
@@ -922,7 +1022,6 @@
         document.getElementById('manualBarcode').addEventListener('keydown', e => {
             if (e.key === 'Enter') cariBarangManual();
         });
-        // Enter di kolom barcode admin → langsung cari nama otomatis
         document.getElementById('inputBarcode').addEventListener('keydown', e => {
             if (e.key === 'Enter') { e.preventDefault(); isiNamaOtomatis(e.target.value); }
         });
@@ -936,7 +1035,6 @@
             if (e.key === 'Enter') simpanBarang();
         });
 
-        // Format ribuan otomatis
         document.getElementById('inputHarga').addEventListener('input', function () {
             const v = this.value.replace(/\D/g, '');
             this.value = v ? Number(v).toLocaleString('id-ID') : '';
@@ -949,7 +1047,6 @@
         document.getElementById('inputBayar').addEventListener('keydown', e => {
             if (e.key === 'Enter') konfirmasiBayar();
         });
-        // Modal tambah cepat
         document.getElementById('qaHarga').addEventListener('input', function () {
             const v = this.value.replace(/\D/g, '');
             this.value = v ? Number(v).toLocaleString('id-ID') : '';
