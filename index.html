@@ -48,7 +48,8 @@
             <!-- TAB -->
             <div class="flex border-b bg-white">
                 <button id="tabBtnBarang" onclick="gantiTab('barang')" class="flex-1 py-2 text-sm font-bold border-b-2 border-red-600 text-red-600">📦 Barang</button>
-                <button id="tabBtnTransaksi" onclick="gantiTab('transaksi')" class="flex-1 py-2 text-sm font-bold border-b-2 border-transparent text-gray-500">🧾 Riwayat</button>
+                <button id="tabBtnTransaksi" onclick="gantiTab('transaksi')" class="flex-1 py-2 text-sm font-bold border-b-2 border-transparent text-gray-500 hover:text-gray-700">🧾 Riwayat</button>
+                <button id="tabBtnLaporan" onclick="gantiTab('laporan')" class="flex-1 py-2 text-sm font-bold border-b-2 border-transparent text-gray-500 hover:text-gray-700">📊 Laporan</button>
             </div>
 
             <div class="flex-1 overflow-y-auto p-4">
@@ -72,7 +73,8 @@
                         </div>
 
                         <input type="text" id="inputNama" placeholder="Nama Barang (otomatis / manual)" class="w-full border p-2 rounded mb-2">
-                        <input type="text" id="inputHarga" inputmode="numeric" placeholder="Harga (misal: 5000)" class="w-full border p-2 rounded mb-2">
+                        <input type="text" id="inputHargaBeli" inputmode="numeric" placeholder="Harga Beli dari Distributor (misal: 10000)" class="w-full border p-2 rounded mb-2">
+                        <input type="text" id="inputHarga" inputmode="numeric" placeholder="Harga Jual ke Pelanggan (misal: 12000)" class="w-full border p-2 rounded mb-2">
                         <input type="number" id="inputStok" min="0" placeholder="Stok (kosongkan = tak terbatas)" class="w-full border p-2 rounded mb-2">
                         <button id="btnSimpanBarang" onclick="simpanBarang()" class="w-full bg-green-500 text-white py-2 rounded-lg font-bold disabled:opacity-50">SIMPAN BARANG</button>
                         <button id="btnBatalEdit" onclick="batalEdit()" class="hidden w-full mt-2 bg-gray-300 text-gray-700 py-1.5 rounded-lg text-sm font-semibold">Batal Edit</button>
@@ -93,6 +95,17 @@
                 <div id="tabTransaksi" class="hidden">
                     <button onclick="loadTransaksi()" class="w-full bg-blue-500 text-white py-2 rounded-lg font-bold mb-3 text-sm">🔄 Muat Ulang Riwayat</button>
                     <div id="listTransaksi"></div>
+                </div>
+
+                <!-- TAB: LAPORAN -->
+                <div id="tabLaporan" class="hidden">
+                    <div class="flex justify-between items-center mb-2">
+                        <h3 class="font-bold">📊 Laporan Laba</h3>
+                        <button onclick="loadLaporan()" class="bg-gray-200 text-gray-700 px-2 py-1 rounded text-xs font-semibold hover:bg-gray-300">🔄 Perbarui</button>
+                    </div>
+                    <label class="text-xs text-gray-500">Pilih tanggal:</label>
+                    <input type="date" id="laporanTanggal" class="w-full border p-2 rounded mb-3" onchange="renderLaporan()">
+                    <div id="laporanIsi"><p class="text-center text-gray-400 py-6">Memuat...</p></div>
                 </div>
             </div>
         </div>
@@ -166,8 +179,10 @@
                 <button onclick="cariUlangNamaQA()" class="w-full bg-indigo-500 text-white py-1.5 rounded text-sm font-semibold mb-2 hover:bg-indigo-600">🔍 Cari Ulang Nama Otomatis</button>
                 <label class="text-sm text-gray-500">Nama Barang</label>
                 <input type="text" id="qaNama" placeholder="Nama produk..." class="w-full border p-2 rounded mb-2">
+                <label class="text-sm text-gray-500">Harga Beli Distributor</label>
+                <input type="text" id="qaHargaBeli" inputmode="numeric" placeholder="misal: 10000" class="w-full border p-2 rounded mb-2">
                 <label class="text-sm text-gray-500">Harga Jual <span class="text-red-500">*</span></label>
-                <input type="text" id="qaHarga" inputmode="numeric" placeholder="misal: 5000" class="w-full border p-2 rounded mb-2">
+                <input type="text" id="qaHarga" inputmode="numeric" placeholder="misal: 12000" class="w-full border p-2 rounded mb-2">
                 <label class="text-sm text-gray-500">Stok (opsional)</label>
                 <input type="number" id="qaStok" min="0" placeholder="kosongkan = tak terbatas" class="w-full border p-2 rounded mb-3">
                 <button id="btnSimpanQA" onclick="simpanQuickAdd()" class="w-full bg-green-500 text-white py-2.5 rounded-lg font-bold hover:bg-green-600 disabled:opacity-50">💾 Simpan & Masukkan Keranjang</button>
@@ -199,8 +214,6 @@
 
         const app = initializeApp(firebaseConfig);
 
-        // ⚡ Cache persisten single-tab (lebih stabil) + long-polling otomatis
-        // (tahan jaringan seluler/proxy yang memutus koneksi streaming)
         let db;
         try {
             db = initializeFirestore(app, {
@@ -245,9 +258,6 @@
         const jeda = ms => new Promise(r => setTimeout(r, ms));
 
         // ================== PELINDUNG TULISAN (ANTI MACET) ==================
-        // Maksimal 10 detik menunggu server. Setelah itu:
-        // - UI langsung lanjut (tombol tidak macet lagi)
-        // - Data TETAP AMAN di perangkat & tersinkron otomatis saat koneksi pulih
         const WAKTU_TULIS = 10000;
         function tulisDenganStatus(p, ms = WAKTU_TULIS) {
             return new Promise((resolve, reject) => {
@@ -279,6 +289,16 @@
 
         function formatTanggal(ms) {
             return new Date(ms).toLocaleString('id-ID', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+        }
+
+        function toLocalDateStr(d) {
+            const p = n => String(n).padStart(2, '0');
+            return d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate());
+        }
+
+        function formatTanggalStrip(ymd) {
+            try { return new Date(ymd + 'T00:00:00').toLocaleDateString('id-ID', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' }); }
+            catch (e) { return ymd; }
         }
 
         function toast(msg, type = 'success') {
@@ -336,7 +356,7 @@
             if (navigator.onLine) el.classList.add('hidden');
             else el.classList.remove('hidden');
         }
-        window.addEventListener('online', () => { perbaruiBadgeOffline(); toast('Kembali online — sinkronisasi berjalan.', 'success'); });
+        window.addEventListener('online', () => { perbaruiBadgeOffline(); toast('Kembali online — sinkronisasi berjalan.'); });
         window.addEventListener('offline', perbaruiBadgeOffline);
         perbaruiBadgeOffline();
 
@@ -497,7 +517,6 @@
             if (barcode === lastScan.text && now - lastScan.time < 1500) return;
             lastScan = { text: barcode, time: now };
 
-            // 1) Cek cache lokal dulu → instan
             let data = cacheBarang.find(b => b.id === barcode);
 
             if (!data) {
@@ -533,7 +552,12 @@
             }
 
             if (existing) existing.qty += 1;
-            else keranjang.push({ barcode, nama: data.nama, harga: Number(data.harga) || 0, stok, qty: 1 });
+            else keranjang.push({
+                barcode, nama: data.nama,
+                harga: Number(data.harga) || 0,
+                hargaBeli: Number(data.hargaBeli) || 0,
+                stok, qty: 1
+            });
 
             beep();
             tampilKeranjang();
@@ -620,6 +644,7 @@
             quickAddBarcode = barcode;
             document.getElementById('qaBarcode').textContent = barcode;
             document.getElementById('qaNama').value = '';
+            document.getElementById('qaHargaBeli').value = (existingData && existingData.hargaBeli) ? existingData.hargaBeli.toLocaleString('id-ID') : '';
             document.getElementById('qaHarga').value = existingData && existingData.harga ? existingData.harga.toLocaleString('id-ID') : '';
             document.getElementById('qaStok').value = (existingData && existingData.stok !== null && existingData.stok !== undefined) ? existingData.stok : '';
             document.getElementById('qaTitle').textContent = existingData ? 'Lengkapi Nama Barang' : 'Tambah Barang Baru';
@@ -637,7 +662,7 @@
             if (res.nama) {
                 document.getElementById('qaNama').value = res.nama;
                 setStatusEl('qaStatus', '✅ Nama ditemukan otomatis! Tinggal isi harga.', 'ok');
-                document.getElementById('qaHarga').focus();
+                document.getElementById('qaHargaBeli').focus();
             } else if (res.online) {
                 setStatusEl('qaStatus', '❌ Barcode belum terdaftar di database online. Ketik nama manual.', 'error');
                 document.getElementById('qaNama').focus();
@@ -659,6 +684,7 @@
             if (btn.disabled) return;
             const barcode = quickAddBarcode;
             const nama = document.getElementById('qaNama').value.trim();
+            const hargaBeli = parseInt((document.getElementById('qaHargaBeli').value || '').replace(/\D/g, '')) || 0;
             const harga = parseInt((document.getElementById('qaHarga').value || '').replace(/\D/g, '')) || 0;
             const stokRaw = document.getElementById('qaStok').value.trim();
             const stok = stokRaw === '' ? null : Math.max(0, parseInt(stokRaw) || 0);
@@ -666,26 +692,26 @@
             if (!barcode) return;
             if (!nama) return toast('Nama barang wajib diisi!', 'error');
             if (harga <= 0) return toast('Isi harga jual barang!', 'error');
+            if (hargaBeli > harga && !confirm('Harga BELI lebih besar dari harga JUAL — barang ini akan rugi. Lanjutkan?')) return;
 
             btn.disabled = true;
             try {
                 const status = await tulisDenganStatus(
-                    window.fs.setDoc(window.fs.doc(window.db, 'barang', barcode), { nama, harga, stok })
+                    window.fs.setDoc(window.fs.doc(window.db, 'barang', barcode), { nama, hargaBeli, harga, stok })
                 );
 
-                // Update cache lokal agar scan berikutnya langsung dikenal
                 const idx = cacheBarang.findIndex(b => b.id === barcode);
-                if (idx >= 0) cacheBarang[idx] = { id: barcode, nama, harga, stok };
-                else cacheBarang.push({ id: barcode, nama, harga, stok });
+                if (idx >= 0) cacheBarang[idx] = { id: barcode, nama, hargaBeli, harga, stok };
+                else cacheBarang.push({ id: barcode, nama, hargaBeli, harga, stok });
                 cacheBarang.sort((a, b) => (a.nama || '').localeCompare(b.nama || ''));
 
                 const existing = keranjang.find(it => it.barcode === barcode);
-                if (existing) { existing.nama = nama; existing.harga = harga; existing.stok = stok; }
-                else keranjang.push({ barcode, nama, harga, stok, qty: 1 });
+                if (existing) { existing.nama = nama; existing.harga = harga; existing.hargaBeli = hargaBeli; existing.stok = stok; }
+                else keranjang.push({ barcode, nama, harga, hargaBeli, stok, qty: 1 });
                 tampilKeranjang();
                 tutupQuickAdd();
                 beep();
-                toast(status === 'tersinkron' ? `"${nama}" tersimpan & masuk keranjang!` : `"${nama}" masuk keranjang (sinkron server menunggu).`, status === 'tersinkron' ? 'success' : 'warn');
+                toast(status === 'tersinkron' ? `"${nama}" tersimpan & masuk keranjang!` : `"${nama}" masuk keranjang (sinkron menunggu).`, status === 'tersinkron' ? 'success' : 'warn');
             } catch (e) {
                 toast('Gagal simpan: ' + e.message, 'error');
             } finally {
@@ -751,16 +777,22 @@
             btn.disabled = true;
             btn.textContent = 'Menyimpan...';
 
+            // Snapshot item: harga jual + harga beli saat transaksi (untuk laporan laba)
+            const items = keranjang.map(i => ({
+                barcode: i.barcode, nama: i.nama,
+                harga: i.harga, hargaBeli: Number(i.hargaBeli) || 0, qty: i.qty
+            }));
+            const totalModal = items.reduce((a, i) => a + i.hargaBeli * i.qty, 0);
             const trx = {
                 id: 'TRX' + Date.now(),
                 waktu: Date.now(),
-                items: keranjang.map(i => ({ barcode: i.barcode, nama: i.nama, harga: i.harga, qty: i.qty })),
-                total, bayar, kembalian: bayar - total
+                items,
+                total, totalModal, laba: total - totalModal,
+                bayar, kembalian: bayar - total
             };
             const snapshotKeranjang = [...keranjang];
 
             try {
-                // SEMUA penulisan dalam SATU batch = SATU perjalanan ke server
                 const batch = window.fs.writeBatch(window.db);
                 batch.set(window.fs.doc(window.db, 'transaksi', trx.id), trx);
                 for (const it of snapshotKeranjang) {
@@ -775,8 +807,8 @@
                 keranjang = [];
                 tampilKeranjang();
                 tutupBayar();
-                if (status === 'tersinkron') toast('Transaksi berhasil disimpan!');
-                else toast('Transaksi tersimpan di perangkat — sinkron menunggu koneksi stabil.', 'warn');
+                if (status === 'tersinkron') toast(`Transaksi berhasil! Laba: ${formatRupiah(trx.laba)}`);
+                else toast('Transaksi tersimpan di perangkat — sinkron menunggu koneksi.', 'warn');
                 cetakStruk(trx);
             } catch (error) {
                 toast('Gagal menyimpan transaksi: ' + error.message, 'error');
@@ -843,22 +875,18 @@
         }
 
         function gantiTab(tab) {
-            const barang = document.getElementById('tabBarang');
-            const transaksi = document.getElementById('tabTransaksi');
-            const btnB = document.getElementById('tabBtnBarang');
-            const btnT = document.getElementById('tabBtnTransaksi');
+            const ids = { barang: ['tabBarang', 'tabBtnBarang'], transaksi: ['tabTransaksi', 'tabBtnTransaksi'], laporan: ['tabLaporan', 'tabBtnLaporan'] };
             const aktif = 'flex-1 py-2 text-sm font-bold border-b-2 border-red-600 text-red-600';
             const nonaktif = 'flex-1 py-2 text-sm font-bold border-b-2 border-transparent text-gray-500 hover:text-gray-700';
-            if (tab === 'barang') {
-                barang.classList.remove('hidden');
-                transaksi.classList.add('hidden');
-                btnB.className = aktif; btnT.className = nonaktif;
-                renderListAdmin();
-            } else {
-                transaksi.classList.remove('hidden');
-                barang.classList.add('hidden');
-                btnT.className = aktif; btnB.className = nonaktif;
-                loadTransaksi();
+            for (const k in ids) {
+                document.getElementById(ids[k][0]).classList.toggle('hidden', k !== tab);
+                document.getElementById(ids[k][1]).className = (k === tab) ? aktif : nonaktif;
+            }
+            if (tab === 'barang') renderListAdmin();
+            if (tab === 'transaksi') loadTransaksi();
+            if (tab === 'laporan') {
+                document.getElementById('laporanTanggal').value = toLocalDateStr(new Date());
+                if (!laporanDimuat) loadLaporan(); else renderLaporan();
             }
         }
 
@@ -882,7 +910,7 @@
             if (res.nama) {
                 document.getElementById('inputNama').value = res.nama;
                 setStatusEl('statusNamaOtomatis', '✅ Ditemukan: ' + res.nama, 'ok');
-                document.getElementById('inputHarga').focus();
+                document.getElementById('inputHargaBeli').focus();
             } else if (res.online) {
                 setStatusEl('statusNamaOtomatis', '❌ Barcode belum terdaftar di database online. Isi nama manual.', 'error');
                 document.getElementById('inputNama').focus();
@@ -937,6 +965,46 @@
             }
         }
 
+        // --- Tambah stok + catat pembelian dari distributor ---
+        async function restockStok(i) {
+            const b = cacheBarang[i];
+            const jawab = prompt(
+                `📥 Tambah Stok: ${b.nama}\n` +
+                `Harga beli tercatat: ${formatRupiah(b.hargaBeli || 0)}\n\n` +
+                `Masukkan jumlah barang masuk dari distributor:`, '1');
+            if (jawab === null) return;
+            const qty = parseInt(jawab) || 0;
+            if (qty <= 0) return toast('Jumlah tidak valid.', 'error');
+            const total = (b.hargaBeli || 0) * qty;
+            if (!confirm(`Catat pembelian?\n${qty} pcs × ${formatRupiah(b.hargaBeli || 0)} = ${formatRupiah(total)}\n\n(Total 0 jika harga beli belum diisi — edit barang dulu bila perlu.)`)) return;
+
+            try {
+                const batch = window.fs.writeBatch(window.db);
+                const ref = window.fs.doc(window.db, 'barang', b.id);
+                if (b.stok === null || b.stok === undefined) batch.set(ref, { stok: qty }, { merge: true });
+                else batch.update(ref, { stok: window.fs.increment(qty) });
+                const pembelian = {
+                    id: 'BLI' + Date.now(), waktu: Date.now(),
+                    barcode: b.id, nama: b.nama, qty,
+                    hargaBeli: b.hargaBeli || 0, total
+                };
+                batch.set(window.fs.doc(window.db, 'pembelian', pembelian.id), pembelian);
+                const status = await tulisDenganStatus(batch.commit());
+
+                // update lokal
+                if (b.stok === null || b.stok === undefined) b.stok = qty;
+                else b.stok += qty;
+                cachePembelianAll.push(pembelian);
+                renderListAdmin();
+                const admTerbuka = !document.getElementById('adminPanel').classList.contains('hidden') &&
+                    !document.getElementById('tabLaporan').classList.contains('hidden');
+                if (admTerbuka && laporanDimuat) renderLaporan();
+                toast(status === 'tersinkron' ? `Stok +${qty}. Pembelian ${formatRupiah(total)} tercatat.` : `Stok +${qty} (sinkron menunggu).`, status === 'tersinkron' ? 'success' : 'warn');
+            } catch (e) {
+                toast('Gagal: ' + e.message, 'error');
+            }
+        }
+
         async function loadListAdmin() {
             if (!window.fs) return toast('Database belum siap.', 'warn');
             try {
@@ -973,17 +1041,21 @@
             divList.innerHTML = data.map(({ b, i }) => {
                 const stokTxt = (b.stok === null || b.stok === undefined) ? '∞' : b.stok;
                 const belumBernama = !b.nama || b.nama === b.id || /^\d+$/.test(b.nama || '');
-                const badge = belumBernama ? '<span class="text-[10px] bg-amber-100 text-amber-700 px-1.5 py-0.5 rounded ml-1">belum bernama</span>' : '';
+                const badgeNama = belumBernama ? '<span class="text-[10px] bg-amber-100 text-amber-700 px-1.5 py-0.5 rounded ml-1">belum bernama</span>' : '';
+                const badgeBeli = !b.hargaBeli ? '<span class="text-[10px] bg-orange-100 text-orange-700 px-1.5 py-0.5 rounded ml-1" title="Harga beli belum diisi — laba tidak akurat">beli?</span>' : '';
+                const marjin = b.hargaBeli ? b.harga - b.hargaBeli : null;
+                const marjinTxt = marjin !== null ? ` • Untung: ${formatRupiah(marjin)}/pcs` : '';
                 return `
                 <div class="flex justify-between items-center bg-white border rounded-lg p-2.5 mb-1.5">
                     <div class="min-w-0">
-                        <div class="font-semibold text-sm text-gray-800 truncate">${escapeHtml(b.nama || b.id)}${badge}</div>
-                        <div class="text-xs text-gray-400">${escapeHtml(b.id)} • Stok: ${stokTxt}</div>
+                        <div class="font-semibold text-sm text-gray-800 truncate">${escapeHtml(b.nama || b.id)}${badgeNama}${badgeBeli}</div>
+                        <div class="text-xs text-gray-400 truncate">${escapeHtml(b.id)} • Stok: ${stokTxt}${marjinTxt}</div>
+                        <div class="text-[11px] text-gray-500">Beli: <b>${formatRupiah(b.hargaBeli)}</b> → Jual: <b class="text-red-600">${formatRupiah(b.harga)}</b></div>
                     </div>
-                    <div class="flex items-center gap-1.5 ml-2">
-                        <span class="font-bold text-sm">${formatRupiah(b.harga)}</span>
-                        <button onclick="lookupNamaSatu(${i})" title="Cari nama otomatis" class="bg-indigo-100 text-indigo-600 w-7 h-7 rounded-full text-xs hover:bg-indigo-200">🔍</button>
+                    <div class="flex items-center gap-1 ml-2">
+                        <button onclick="restockStok(${i})" title="Tambah stok (catat pembelian)" class="bg-green-100 text-green-700 w-7 h-7 rounded-full text-xs hover:bg-green-200">📥</button>
                         <button onclick="isiFormEdit(${i})" title="Edit" class="bg-blue-100 text-blue-600 w-7 h-7 rounded-full text-xs hover:bg-blue-200">✏️</button>
+                        <button onclick="lookupNamaSatu(${i})" title="Cari nama otomatis" class="bg-indigo-100 text-indigo-600 w-7 h-7 rounded-full text-xs hover:bg-indigo-200">🔍</button>
                         <button onclick="hapusBarangDb(${i})" title="Hapus" class="bg-red-100 text-red-600 w-7 h-7 rounded-full text-xs hover:bg-red-200">🗑️</button>
                     </div>
                 </div>`;
@@ -998,6 +1070,7 @@
             bc.readOnly = true;
             bc.classList.add('bg-gray-100');
             document.getElementById('inputNama').value = b.nama || '';
+            document.getElementById('inputHargaBeli').value = b.hargaBeli ? b.hargaBeli.toLocaleString('id-ID') : '';
             document.getElementById('inputHarga').value = (b.harga || 0).toLocaleString('id-ID');
             document.getElementById('inputStok').value = (b.stok === null || b.stok === undefined) ? '' : b.stok;
             document.getElementById('btnSimpanBarang').textContent = 'UPDATE BARANG';
@@ -1018,26 +1091,27 @@
 
         async function simpanBarang() {
             const btn = document.getElementById('btnSimpanBarang');
-            if (btn.disabled) return; // cegah dobel klik / dobel Enter
+            if (btn.disabled) return;
 
             const bcInput = document.getElementById('inputBarcode');
             const barcode = bcInput.value.trim();
             const nama = document.getElementById('inputNama').value.trim();
+            const hargaBeli = parseInt((document.getElementById('inputHargaBeli').value || '').replace(/\D/g, '')) || 0;
             const harga = parseInt((document.getElementById('inputHarga').value || '').replace(/\D/g, '')) || 0;
             const stokRaw = document.getElementById('inputStok').value.trim();
             const stok = stokRaw === '' ? null : Math.max(0, parseInt(stokRaw) || 0);
 
             if (!barcode) return toast('Barcode wajib diisi!', 'error');
             if (!nama) return toast('Nama barang wajib diisi!', 'error');
-            if (harga <= 0) return toast('Harga harus lebih dari 0!', 'error');
+            if (harga <= 0) return toast('Harga jual harus lebih dari 0!', 'error');
+            if (hargaBeli > harga && !confirm('Harga BELI lebih besar dari harga JUAL — barang ini akan rugi tiap terjual. Lanjutkan?')) return;
 
             const sedangEdit = !!editBarcode;
             btn.disabled = true;
             btn.textContent = 'Menyimpan...';
 
-            const dataBaru = { nama, harga, stok };
+            const dataBaru = { nama, hargaBeli, harga, stok };
 
-            // ⚡ Update optimis: tampilkan langsung di daftar tanpa nunggu server
             const idx = cacheBarang.findIndex(b => b.id === barcode);
             if (idx >= 0) cacheBarang[idx] = { id: barcode, ...dataBaru };
             else cacheBarang.push({ id: barcode, ...dataBaru });
@@ -1045,8 +1119,6 @@
             if (barangLoaded) renderListAdmin();
 
             try {
-                // ⏱️ Maksimal 10 detik. Setelah itu dianggap "menunggu sinkron",
-                // data tetap aman di perangkat & tersinkron otomatis nanti.
                 const status = await tulisDenganStatus(
                     window.fs.setDoc(window.fs.doc(window.db, 'barang', barcode), dataBaru)
                 );
@@ -1058,13 +1130,14 @@
                 );
                 bcInput.value = '';
                 document.getElementById('inputNama').value = '';
+                document.getElementById('inputHargaBeli').value = '';
                 document.getElementById('inputHarga').value = '';
                 document.getElementById('inputStok').value = '';
                 batalEdit();
                 setStatusEl('statusNamaOtomatis', null);
             } catch (error) {
                 toast('Gagal simpan: ' + error.message, 'error');
-                renderListAdmin(); // daftar dikoreksi dari server/cache
+                renderListAdmin();
             } finally {
                 btn.disabled = false;
                 btn.textContent = 'SIMPAN BARANG';
@@ -1104,12 +1177,13 @@
 
                 div.innerHTML = cacheTransaksi.map((t, i) => {
                     const items = t.items || [];
+                    const m = labaTrx(t);
                     return `
                     <details class="bg-white border rounded-lg mb-2 overflow-hidden">
                         <summary class="p-3 cursor-pointer flex justify-between items-center hover:bg-gray-50">
                             <div>
                                 <div class="text-sm font-semibold text-gray-800">${formatTanggal(t.waktu)}</div>
-                                <div class="text-xs text-gray-400">${escapeHtml(t.id)} • ${items.length} jenis barang</div>
+                                <div class="text-xs text-gray-400">${escapeHtml(t.id)} • ${items.length} jenis • <span class="text-green-600 font-semibold">laba ${formatRupiah(m.laba)}</span></div>
                             </div>
                             <span class="font-bold text-red-600 text-sm">${formatRupiah(t.total)}</span>
                         </summary>
@@ -1121,6 +1195,8 @@
                                 </div>`).join('')}
                             <div class="flex justify-between text-xs font-semibold border-t mt-1 pt-1"><span>Bayar</span><span>${formatRupiah(t.bayar)}</span></div>
                             <div class="flex justify-between text-xs font-semibold"><span>Kembali</span><span>${formatRupiah(t.kembalian)}</span></div>
+                            <div class="flex justify-between text-xs font-semibold text-gray-500"><span>Modal</span><span>${formatRupiah(m.modal)}</span></div>
+                            <div class="flex justify-between text-xs font-bold text-green-600"><span>Laba</span><span>${formatRupiah(m.laba)}</span></div>
                             <button onclick="cetakUlangStruk(${i})" class="mt-2 w-full bg-blue-500 text-white text-xs py-1.5 rounded-lg hover:bg-blue-600">🖨️ Cetak Ulang Struk</button>
                         </div>
                     </details>`;
@@ -1128,6 +1204,142 @@
             } catch (e) {
                 div.innerHTML = '<p class="text-center text-red-500 py-3">Gagal memuat: ' + escapeHtml(e.message) + '</p>';
             }
+        }
+
+        // ================== LAPORAN LABA ==================
+        let laporanDimuat = false;
+        let cacheTransaksiAll = [];
+        let cachePembelianAll = [];
+
+        // Modal & laba satu transaksi (kompatibel transaksi lama yang belum punya hargaBeli)
+        function labaTrx(t) {
+            const modal = (t.totalModal !== undefined && t.totalModal !== null)
+                ? t.totalModal
+                : (t.items || []).reduce((a, i) => a + (Number(i.hargaBeli) || 0) * (i.qty || 0), 0);
+            return { modal, laba: (t.total || 0) - modal };
+        }
+
+        function agregasiTrx(list) {
+            let pcs = 0, omzet = 0, modal = 0;
+            const map = {};
+            list.forEach(t => {
+                (t.items || []).forEach(it => {
+                    const q = Number(it.qty) || 0;
+                    const h = Number(it.harga) || 0;
+                    const hb = Number(it.hargaBeli) || 0;
+                    pcs += q; omzet += h * q; modal += hb * q;
+                    const key = it.barcode || it.nama;
+                    const e = map[key] || (map[key] = { nama: it.nama, qty: 0, omzet: 0, laba: 0 });
+                    e.qty += q; e.omzet += h * q; e.laba += (h - hb) * q;
+                });
+            });
+            const perBarang = Object.values(map).sort((a, b) => b.laba - a.laba);
+            return { jumlah: list.length, pcs, omzet, modal, laba: omzet - modal, perBarang };
+        }
+
+        async function loadLaporan() {
+            const isi = document.getElementById('laporanIsi');
+            isi.innerHTML = '<p class="text-center text-gray-400 py-6">Memuat laporan...</p>';
+            try {
+                const [snapT, snapP] = await Promise.all([
+                    window.fs.getDocs(window.fs.collection(window.db, 'transaksi')),
+                    window.fs.getDocs(window.fs.collection(window.db, 'pembelian')).catch(() => null)
+                ]);
+                cacheTransaksiAll = [];
+                snapT.forEach(d => cacheTransaksiAll.push(d.data()));
+                cacheTransaksiAll.sort((a, b) => (b.waktu || 0) - (a.waktu || 0));
+                cachePembelianAll = [];
+                if (snapP) snapP.forEach(d => cachePembelianAll.push(d.data()));
+                laporanDimuat = true;
+                renderLaporan();
+            } catch (e) {
+                isi.innerHTML = '<p class="text-center text-red-500 py-6">Gagal memuat: ' + escapeHtml(e.message) + '</p>';
+            }
+        }
+
+        function renderLaporan() {
+            const isi = document.getElementById('laporanIsi');
+            if (!laporanDimuat) { isi.innerHTML = '<p class="text-center text-gray-400 py-6">Tekan 🔄 Perbarui untuk memuat.</p>'; return; }
+
+            const tgl = document.getElementById('laporanTanggal').value || toLocalDateStr(new Date());
+            const trxHari = cacheTransaksiAll.filter(t => toLocalDateStr(new Date(t.waktu)) === tgl);
+            const a = agregasiTrx(trxHari);
+            const ao = agregasiTrx(cacheTransaksiAll);
+            const beliHari = cachePembelianAll.filter(p => toLocalDateStr(new Date(p.waktu)) === tgl);
+            const belanjaHari = beliHari.reduce((s, p) => s + (p.total || 0), 0);
+            const belanjaTotal = cachePembelianAll.reduce((s, p) => s + (p.total || 0), 0);
+            const blmBeli = cacheBarang.filter(b => !b.hargaBeli).length;
+
+            const kartu = (label, nilai, cls = 'text-gray-800') => `
+                <div class="bg-white border rounded-xl p-3">
+                    <div class="text-[10px] uppercase text-gray-400 font-semibold">${label}</div>
+                    <div class="text-lg font-bold ${cls}">${nilai}</div>
+                </div>`;
+
+            const daftarTrxHari = trxHari.length ? trxHari.map(t => {
+                const m = labaTrx(t);
+                return `
+                <details class="bg-white border rounded-lg mb-1.5">
+                    <summary class="p-2.5 cursor-pointer flex justify-between items-center">
+                        <div class="min-w-0">
+                            <div class="text-xs font-semibold">${new Date(t.waktu).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })} • ${escapeHtml(t.id || '')}</div>
+                            <div class="text-[10px] text-gray-400">${(t.items || []).length} jenis • laba <span class="text-green-600 font-semibold">${formatRupiah(m.laba)}</span></div>
+                        </div>
+                        <span class="font-bold text-sm">${formatRupiah(t.total)}</span>
+                    </summary>
+                    <div class="px-3 pb-2 border-t pt-1.5 text-xs">
+                        ${(t.items || []).map(it => `<div class="flex justify-between py-0.5"><span>${escapeHtml(it.nama)} × ${it.qty}</span><span>${formatRupiah((it.harga || 0) * it.qty)}</span></div>`).join('')}
+                        <div class="flex justify-between font-semibold border-t mt-1 pt-1 text-gray-500"><span>Modal</span><span>${formatRupiah(m.modal)}</span></div>
+                        <div class="flex justify-between font-bold text-green-600"><span>Laba</span><span>${formatRupiah(m.laba)}</span></div>
+                    </div>
+                </details>`;
+            }).join('') : '<p class="text-center text-gray-400 py-3 text-sm">Tidak ada transaksi pada tanggal ini.</p>';
+
+            const perBarangRows = a.perBarang.length ? a.perBarang.map(e => `
+                <div class="flex justify-between items-center text-xs py-1.5 border-b last:border-0">
+                    <div class="min-w-0 pr-2">
+                        <div class="font-semibold truncate">${escapeHtml(e.nama)}</div>
+                        <div class="text-gray-400">${e.qty} pcs • omzet ${formatRupiah(e.omzet)}</div>
+                    </div>
+                    <div class="text-right font-bold text-green-600 whitespace-nowrap">${formatRupiah(e.laba)}</div>
+                </div>`).join('') : '<p class="text-xs text-gray-400 py-2">Belum ada barang terjual.</p>';
+
+            isi.innerHTML = `
+                ${blmBeli ? `<div class="bg-amber-50 border border-amber-200 text-amber-700 text-xs rounded-lg px-3 py-2 mb-3">⚠️ ${blmBeli} barang belum punya harga beli (dihitung modal 0). Edit barang & isi harga beli agar laba akurat.</div>` : ''}
+
+                <div class="bg-white border rounded-xl p-4 mb-3">
+                    <h4 class="font-bold text-sm mb-2">📅 Harian — ${formatTanggalStrip(tgl)}</h4>
+                    <div class="grid grid-cols-2 gap-2 mb-2">
+                        ${kartu('Transaksi', a.jumlah)}
+                        ${kartu('Barang Terjual', a.pcs + ' pcs')}
+                        ${kartu('Penjualan', formatRupiah(a.omzet), 'text-blue-600')}
+                        ${kartu('Modal Terjual', formatRupiah(a.modal), 'text-orange-600')}
+                    </div>
+                    <div class="bg-green-50 border border-green-200 rounded-xl p-3 mb-2">
+                        <div class="text-[10px] uppercase text-green-700 font-semibold">Laba Harian (Penjualan − Modal)</div>
+                        <div class="text-2xl font-bold ${a.laba >= 0 ? 'text-green-600' : 'text-red-600'}">${formatRupiah(a.laba)}</div>
+                    </div>
+                    ${beliHari.length ? `<div class="text-xs text-gray-500 mb-1">📥 Belanja stok hari ini: <b>${formatRupiah(belanjaHari)}</b> (${beliHari.length} pembelian)</div>` : ''}
+                    <h5 class="font-bold text-[10px] uppercase text-gray-400 mt-3 mb-1">Akumulasi Barang Terjual (urut laba terbesar)</h5>
+                    ${perBarangRows}
+                    <h5 class="font-bold text-[10px] uppercase text-gray-400 mt-3 mb-1">Transaksi Hari Ini</h5>
+                    ${daftarTrxHari}
+                </div>
+
+                <div class="bg-white border rounded-xl p-4">
+                    <h4 class="font-bold text-sm mb-2">🏆 Keseluruhan (Semua Waktu)</h4>
+                    <div class="grid grid-cols-2 gap-2 mb-2">
+                        ${kartu('Total Transaksi', ao.jumlah)}
+                        ${kartu('Total Barang Terjual', ao.pcs + ' pcs')}
+                        ${kartu('Total Penjualan', formatRupiah(ao.omzet), 'text-blue-600')}
+                        ${kartu('Total Modal', formatRupiah(ao.modal), 'text-orange-600')}
+                    </div>
+                    <div class="bg-green-50 border border-green-200 rounded-xl p-3 mb-2">
+                        <div class="text-[10px] uppercase text-green-700 font-semibold">Laba Keseluruhan (Penjualan − Pembelian)</div>
+                        <div class="text-2xl font-bold ${ao.laba >= 0 ? 'text-green-600' : 'text-red-600'}">${formatRupiah(ao.laba)}</div>
+                    </div>
+                    ${cachePembelianAll.length ? `<div class="text-xs text-gray-500">📥 Total belanja stok: <b>${formatRupiah(belanjaTotal)}</b> (${cachePembelianAll.length} pembelian) — uang keluar untuk stok yang belum tentu terjual semua.</div>` : ''}
+                </div>`;
         }
 
         // ================== EVENT LISTENER ==================
@@ -1138,6 +1350,9 @@
             if (e.key === 'Enter') { e.preventDefault(); isiNamaOtomatis(e.target.value); }
         });
         document.getElementById('inputNama').addEventListener('keydown', e => {
+            if (e.key === 'Enter') document.getElementById('inputHargaBeli').focus();
+        });
+        document.getElementById('inputHargaBeli').addEventListener('keydown', e => {
             if (e.key === 'Enter') document.getElementById('inputHarga').focus();
         });
         document.getElementById('inputHarga').addEventListener('keydown', e => {
@@ -1147,10 +1362,18 @@
             if (e.key === 'Enter') simpanBarang();
         });
 
-        document.getElementById('inputHarga').addEventListener('input', function () {
-            const v = this.value.replace(/\D/g, '');
-            this.value = v ? Number(v).toLocaleString('id-ID') : '';
-        });
+        const formatInputRibuan = id => {
+            const el = document.getElementById(id);
+            el.addEventListener('input', function () {
+                const v = this.value.replace(/\D/g, '');
+                this.value = v ? Number(v).toLocaleString('id-ID') : '';
+            });
+        };
+        formatInputRibuan('inputHargaBeli');
+        formatInputRibuan('inputHarga');
+        formatInputRibuan('qaHargaBeli');
+        formatInputRibuan('qaHarga');
+
         document.getElementById('inputBayar').addEventListener('input', function () {
             const v = this.value.replace(/\D/g, '');
             this.value = v ? Number(v).toLocaleString('id-ID') : '';
@@ -1159,11 +1382,10 @@
         document.getElementById('inputBayar').addEventListener('keydown', e => {
             if (e.key === 'Enter') konfirmasiBayar();
         });
-        document.getElementById('qaHarga').addEventListener('input', function () {
-            const v = this.value.replace(/\D/g, '');
-            this.value = v ? Number(v).toLocaleString('id-ID') : '';
-        });
         document.getElementById('qaNama').addEventListener('keydown', e => {
+            if (e.key === 'Enter') document.getElementById('qaHargaBeli').focus();
+        });
+        document.getElementById('qaHargaBeli').addEventListener('keydown', e => {
             if (e.key === 'Enter') document.getElementById('qaHarga').focus();
         });
         document.getElementById('qaHarga').addEventListener('keydown', e => {
