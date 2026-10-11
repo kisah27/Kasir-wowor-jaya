@@ -23,6 +23,7 @@
             <div>
                 <h1 class="text-xl font-bold tracking-wider">WOWOR-JAYA</h1>
                 <p id="jamDigital" class="text-xs text-red-100 font-mono mt-1">--:--:--</p>
+                <span id="badgeOffline" class="hidden inline-block mt-1 text-[10px] bg-black/30 px-2 py-0.5 rounded-full">📴 Offline — data tersimpan lokal dulu</span>
             </div>
             <div class="flex gap-2">
                 <button onclick="bukaScanner()" class="bg-white text-red-600 p-2 rounded-full hover:bg-gray-100 transition" title="Scan Barang Kasir">
@@ -169,7 +170,7 @@
                 <input type="text" id="qaHarga" inputmode="numeric" placeholder="misal: 5000" class="w-full border p-2 rounded mb-2">
                 <label class="text-sm text-gray-500">Stok (opsional)</label>
                 <input type="number" id="qaStok" min="0" placeholder="kosongkan = tak terbatas" class="w-full border p-2 rounded mb-3">
-                <button onclick="simpanQuickAdd()" class="w-full bg-green-500 text-white py-2.5 rounded-lg font-bold hover:bg-green-600">💾 Simpan & Masukkan Keranjang</button>
+                <button id="btnSimpanQA" onclick="simpanQuickAdd()" class="w-full bg-green-500 text-white py-2.5 rounded-lg font-bold hover:bg-green-600 disabled:opacity-50">💾 Simpan & Masukkan Keranjang</button>
                 <button onclick="tutupQuickAdd()" class="w-full mt-2 text-gray-500 py-2 text-sm hover:bg-gray-100 rounded-lg">Batal</button>
             </div>
         </div>
@@ -180,7 +181,7 @@
         import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js";
         import {
             getFirestore, initializeFirestore,
-            persistentLocalCache, persistentMultipleTabManager,
+            persistentLocalCache, persistentSingleTabManager,
             doc, getDoc, setDoc, getDocs, collection, deleteDoc, updateDoc,
             query, orderBy, limit, writeBatch, increment, onSnapshot
         } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
@@ -198,12 +199,13 @@
 
         const app = initializeApp(firebaseConfig);
 
-        // ⚡ Cache lokal persisten: baca data = instan dari perangkat,
-        // tulis otomatis tersinkron ke server (tahan offline)
+        // ⚡ Cache persisten single-tab (lebih stabil) + long-polling otomatis
+        // (tahan jaringan seluler/proxy yang memutus koneksi streaming)
         let db;
         try {
             db = initializeFirestore(app, {
-                localCache: persistentLocalCache({ tabManager: persistentMultipleTabManager() })
+                localCache: persistentLocalCache({ tabManager: persistentSingleTabManager() }),
+                experimentalAutoDetectLongPolling: true
             });
         } catch (e) {
             db = getFirestore(app);
@@ -242,6 +244,29 @@
         const KEY_KERANJANG = 'woworjaya_keranjang_v2';
         const jeda = ms => new Promise(r => setTimeout(r, ms));
 
+        // ================== PELINDUNG TULISAN (ANTI MACET) ==================
+        // Maksimal 10 detik menunggu server. Setelah itu:
+        // - UI langsung lanjut (tombol tidak macet lagi)
+        // - Data TETAP AMAN di perangkat & tersinkron otomatis saat koneksi pulih
+        const WAKTU_TULIS = 10000;
+        function tulisDenganStatus(p, ms = WAKTU_TULIS) {
+            return new Promise((resolve, reject) => {
+                let selesai = false;
+                const timer = setTimeout(() => {
+                    if (selesai) return;
+                    selesai = true;
+                    p.then(() => console.log('[Sinkron] data tersinkron ke server (terlambat)'))
+                     .catch(err => console.error('[Sinkron] tulisan tertunda GAGAL:', err));
+                    resolve('menunggu');
+                }, ms);
+                p.then(() => {
+                    if (!selesai) { selesai = true; clearTimeout(timer); resolve('tersinkron'); }
+                }).catch(err => {
+                    if (!selesai) { selesai = true; clearTimeout(timer); reject(err); }
+                });
+            });
+        }
+
         // ================== UTILITAS ==================
         function formatRupiah(angka) {
             return 'Rp ' + (Number(angka) || 0).toLocaleString('id-ID');
@@ -267,7 +292,7 @@
             setTimeout(() => {
                 el.classList.add('opacity-0');
                 setTimeout(() => el.remove(), 350);
-            }, 2500);
+            }, 3000);
         }
 
         function setStatusEl(id, pesan, tipe) {
@@ -305,9 +330,17 @@
         setInterval(updateJam, 1000);
         updateJam();
 
+        // Indikator offline
+        function perbaruiBadgeOffline() {
+            const el = document.getElementById('badgeOffline');
+            if (navigator.onLine) el.classList.add('hidden');
+            else el.classList.remove('hidden');
+        }
+        window.addEventListener('online', () => { perbaruiBadgeOffline(); toast('Kembali online — sinkronisasi berjalan.', 'success'); });
+        window.addEventListener('offline', perbaruiBadgeOffline);
+        perbaruiBadgeOffline();
+
         // ================== SINKRONISASI REAL-TIME DAFTAR BARANG ==================
-        // Database barang disalin ke perangkat & selalu ter-update otomatis.
-        // Scan jadi INSTAN karena tidak perlu tanya server tiap kali.
         function subscribeBarang() {
             if (subscribeBarang._started || !window.fs) return;
             subscribeBarang._started = true;
@@ -464,25 +497,22 @@
             if (barcode === lastScan.text && now - lastScan.time < 1500) return;
             lastScan = { text: barcode, time: now };
 
-            // ⚡ 1) Cek cache lokal dulu → INSTAN, tanpa internet
+            // 1) Cek cache lokal dulu → instan
             let data = cacheBarang.find(b => b.id === barcode);
 
-            // 2) Jika belum ada di cache (misal baru buka aplikasi), tanya server sekali
             if (!data) {
                 try {
                     const snap = await window.fs.getDoc(window.fs.doc(window.db, 'barang', barcode));
                     if (snap.exists()) data = { id: barcode, ...snap.data() };
-                } catch (e) { /* offline & tidak di cache → lanjut ke tambah baru */ }
+                } catch (e) { /* offline & tidak di cache → lanjut tambah baru */ }
             }
 
-            // 3) Tidak ada di mana pun → dialog tambah baru + cari nama otomatis
             if (!data) {
                 beep(220, 220, 'sawtooth');
                 bukaQuickAdd(barcode);
                 return;
             }
 
-            // 4) Ada tapi belum bernama → minta dilengkapi
             const namaDb = (data.nama || '').trim();
             if (!namaDb || namaDb === barcode || /^\d+$/.test(namaDb)) {
                 beep(220, 220, 'sawtooth');
@@ -585,7 +615,7 @@
             }
         }
 
-        // ================== TAMBAH CEPAT (BARANG BARU / BELUM BERNAMA) ==================
+        // ================== TAMBAH CEPAT ==================
         async function bukaQuickAdd(barcode, existingData) {
             quickAddBarcode = barcode;
             document.getElementById('qaBarcode').textContent = barcode;
@@ -625,6 +655,8 @@
         }
 
         async function simpanQuickAdd() {
+            const btn = document.getElementById('btnSimpanQA');
+            if (btn.disabled) return;
             const barcode = quickAddBarcode;
             const nama = document.getElementById('qaNama').value.trim();
             const harga = parseInt((document.getElementById('qaHarga').value || '').replace(/\D/g, '')) || 0;
@@ -635,20 +667,29 @@
             if (!nama) return toast('Nama barang wajib diisi!', 'error');
             if (harga <= 0) return toast('Isi harga jual barang!', 'error');
 
+            btn.disabled = true;
             try {
-                await window.fs.setDoc(window.fs.doc(window.db, 'barang', barcode), { nama, harga, stok });
+                const status = await tulisDenganStatus(
+                    window.fs.setDoc(window.fs.doc(window.db, 'barang', barcode), { nama, harga, stok })
+                );
+
+                // Update cache lokal agar scan berikutnya langsung dikenal
+                const idx = cacheBarang.findIndex(b => b.id === barcode);
+                if (idx >= 0) cacheBarang[idx] = { id: barcode, nama, harga, stok };
+                else cacheBarang.push({ id: barcode, nama, harga, stok });
+                cacheBarang.sort((a, b) => (a.nama || '').localeCompare(b.nama || ''));
+
                 const existing = keranjang.find(it => it.barcode === barcode);
-                if (existing) {
-                    existing.nama = nama; existing.harga = harga; existing.stok = stok;
-                } else {
-                    keranjang.push({ barcode, nama, harga, stok, qty: 1 });
-                }
+                if (existing) { existing.nama = nama; existing.harga = harga; existing.stok = stok; }
+                else keranjang.push({ barcode, nama, harga, stok, qty: 1 });
                 tampilKeranjang();
                 tutupQuickAdd();
                 beep();
-                toast(`"${nama}" tersimpan & masuk keranjang!`);
+                toast(status === 'tersinkron' ? `"${nama}" tersimpan & masuk keranjang!` : `"${nama}" masuk keranjang (sinkron server menunggu).`, status === 'tersinkron' ? 'success' : 'warn');
             } catch (e) {
                 toast('Gagal simpan: ' + e.message, 'error');
+            } finally {
+                btn.disabled = false;
             }
         }
 
@@ -701,11 +742,12 @@
         }
 
         async function konfirmasiBayar() {
+            const btn = document.getElementById('btnKonfirmasiBayar');
+            if (btn.disabled) return;
             const total = hitungTotalKeranjang();
             const bayar = parseInt((document.getElementById('inputBayar').value || '').replace(/\D/g, '')) || 0;
             if (bayar < total) return toast('Uang bayar kurang!', 'error');
 
-            const btn = document.getElementById('btnKonfirmasiBayar');
             btn.disabled = true;
             btn.textContent = 'Menyimpan...';
 
@@ -715,29 +757,26 @@
                 items: keranjang.map(i => ({ barcode: i.barcode, nama: i.nama, harga: i.harga, qty: i.qty })),
                 total, bayar, kembalian: bayar - total
             };
+            const snapshotKeranjang = [...keranjang];
 
             try {
-                // ⚡ SEMUA penulisan (transaksi + pengurangan stok semua barang)
-                // dikirim dalam SATU batch = SATU perjalanan ke server.
+                // SEMUA penulisan dalam SATU batch = SATU perjalanan ke server
                 const batch = window.fs.writeBatch(window.db);
                 batch.set(window.fs.doc(window.db, 'transaksi', trx.id), trx);
-                for (const it of keranjang) {
+                for (const it of snapshotKeranjang) {
                     if (it.stok !== null && it.stok !== undefined) {
                         batch.update(window.fs.doc(window.db, 'barang', it.barcode), {
                             stok: window.fs.increment(-it.qty)
                         });
                     }
                 }
-                const commitPromise = batch.commit();
-                commitPromise.catch(() => {}); // hindari warning jika timeout menang
-                // Timeout 8 dtk: jika internet putus, tetap bisa checkout
-                // (data tersimpan lokal & tersinkron otomatis begitu online)
-                await Promise.race([commitPromise, jeda(8000)]);
+                const status = await tulisDenganStatus(batch.commit());
 
                 keranjang = [];
                 tampilKeranjang();
                 tutupBayar();
-                toast('Transaksi berhasil disimpan!');
+                if (status === 'tersinkron') toast('Transaksi berhasil disimpan!');
+                else toast('Transaksi tersimpan di perangkat — sinkron menunggu koneksi stabil.', 'warn');
                 cetakStruk(trx);
             } catch (error) {
                 toast('Gagal menyimpan transaksi: ' + error.message, 'error');
@@ -796,7 +835,6 @@
             if (pin !== ADMIN_PIN) return toast('PIN salah!', 'error');
             document.getElementById('adminPanel').classList.remove('hidden');
             gantiTab('barang');
-            renderListAdmin(); // data sudah live dari listener, tidak perlu fetch ulang
         }
 
         function tutupAdmin() {
@@ -871,7 +909,9 @@
                 const res = await cariNamaProdukOnline(b.id);
                 if (res.nama) {
                     try {
-                        await window.fs.setDoc(window.fs.doc(window.db, 'barang', b.id), { nama: res.nama }, { merge: true });
+                        await tulisDenganStatus(
+                            window.fs.setDoc(window.fs.doc(window.db, 'barang', b.id), { nama: res.nama }, { merge: true })
+                        );
                         ok++;
                     } catch (e) { gagal++; }
                 } else gagal++;
@@ -885,8 +925,10 @@
             const res = await cariNamaProdukOnline(b.id);
             if (res.nama) {
                 try {
-                    await window.fs.setDoc(window.fs.doc(window.db, 'barang', b.id), { nama: res.nama }, { merge: true });
-                    toast('Nama diupdate: ' + res.nama);
+                    const status = await tulisDenganStatus(
+                        window.fs.setDoc(window.fs.doc(window.db, 'barang', b.id), { nama: res.nama }, { merge: true })
+                    );
+                    toast(status === 'tersinkron' ? 'Nama diupdate: ' + res.nama : 'Nama tersimpan lokal (sinkron menunggu).', status === 'tersinkron' ? 'success' : 'warn');
                 } catch (e) { toast('Gagal update: ' + e.message, 'error'); }
             } else if (res.online) {
                 toast('Barcode ' + b.id + ' tidak ditemukan di database online.', 'warn');
@@ -895,7 +937,6 @@
             }
         }
 
-        // Fallback manual (tombol 🔄) — biasanya tidak dibutuhkan karena data live
         async function loadListAdmin() {
             if (!window.fs) return toast('Database belum siap.', 'warn');
             try {
@@ -976,6 +1017,9 @@
         }
 
         async function simpanBarang() {
+            const btn = document.getElementById('btnSimpanBarang');
+            if (btn.disabled) return; // cegah dobel klik / dobel Enter
+
             const bcInput = document.getElementById('inputBarcode');
             const barcode = bcInput.value.trim();
             const nama = document.getElementById('inputNama').value.trim();
@@ -987,21 +1031,40 @@
             if (!nama) return toast('Nama barang wajib diisi!', 'error');
             if (harga <= 0) return toast('Harga harus lebih dari 0!', 'error');
 
-            const btn = document.getElementById('btnSimpanBarang');
+            const sedangEdit = !!editBarcode;
             btn.disabled = true;
             btn.textContent = 'Menyimpan...';
+
+            const dataBaru = { nama, harga, stok };
+
+            // ⚡ Update optimis: tampilkan langsung di daftar tanpa nunggu server
+            const idx = cacheBarang.findIndex(b => b.id === barcode);
+            if (idx >= 0) cacheBarang[idx] = { id: barcode, ...dataBaru };
+            else cacheBarang.push({ id: barcode, ...dataBaru });
+            cacheBarang.sort((a, b) => (a.nama || '').localeCompare(b.nama || ''));
+            if (barangLoaded) renderListAdmin();
+
             try {
-                await window.fs.setDoc(window.fs.doc(window.db, 'barang', barcode), { nama, harga, stok });
-                toast(editBarcode ? 'Barang berhasil diupdate!' : 'Barang baru berhasil disimpan!');
+                // ⏱️ Maksimal 10 detik. Setelah itu dianggap "menunggu sinkron",
+                // data tetap aman di perangkat & tersinkron otomatis nanti.
+                const status = await tulisDenganStatus(
+                    window.fs.setDoc(window.fs.doc(window.db, 'barang', barcode), dataBaru)
+                );
+                toast(
+                    status === 'tersinkron'
+                        ? (sedangEdit ? 'Barang berhasil diupdate!' : 'Barang baru berhasil disimpan!')
+                        : 'Tersimpan di perangkat — sinkron ke server menunggu koneksi stabil.',
+                    status === 'tersinkron' ? 'success' : 'warn'
+                );
                 bcInput.value = '';
                 document.getElementById('inputNama').value = '';
                 document.getElementById('inputHarga').value = '';
                 document.getElementById('inputStok').value = '';
                 batalEdit();
                 setStatusEl('statusNamaOtomatis', null);
-                // Daftar di bawah ter-update otomatis (real-time listener)
             } catch (error) {
                 toast('Gagal simpan: ' + error.message, 'error');
+                renderListAdmin(); // daftar dikoreksi dari server/cache
             } finally {
                 btn.disabled = false;
                 btn.textContent = 'SIMPAN BARANG';
@@ -1012,8 +1075,10 @@
             const b = cacheBarang[i];
             if (!confirm(`Hapus "${b.nama || b.id}" dari database?`)) return;
             try {
-                await window.fs.deleteDoc(window.fs.doc(window.db, 'barang', b.id));
-                toast('Barang dihapus.');
+                const status = await tulisDenganStatus(
+                    window.fs.deleteDoc(window.fs.doc(window.db, 'barang', b.id))
+                );
+                toast(status === 'tersinkron' ? 'Barang dihapus.' : 'Dihapus di perangkat (sinkron menunggu).', status === 'tersinkron' ? 'success' : 'warn');
             } catch (e) {
                 toast('Gagal hapus: ' + e.message, 'error');
             }
