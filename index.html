@@ -93,7 +93,11 @@
 
                 <!-- TAB: RIWAYAT TRANSAKSI -->
                 <div id="tabTransaksi" class="hidden">
-                    <button onclick="loadTransaksi()" class="w-full bg-blue-500 text-white py-2 rounded-lg font-bold mb-3 text-sm">🔄 Muat Ulang Riwayat</button>
+                    <div class="flex gap-2 mb-3">
+                        <button onclick="loadTransaksi()" class="flex-1 bg-blue-500 text-white py-2 rounded-lg font-bold text-sm hover:bg-blue-600">🔄 Muat Ulang</button>
+                        <button onclick="backupData()" class="bg-gray-200 text-gray-700 px-3 py-2 rounded-lg font-bold text-sm hover:bg-gray-300" title="Unduh salinan semua data (JSON)">💾 Backup</button>
+                        <button id="btnResetRiwayat" onclick="resetRiwayat()" class="bg-red-500 text-white px-3 py-2 rounded-lg font-bold text-sm hover:bg-red-600">🗑️ Reset</button>
+                    </div>
                     <div id="listTransaksi"></div>
                 </div>
 
@@ -101,7 +105,10 @@
                 <div id="tabLaporan" class="hidden">
                     <div class="flex justify-between items-center mb-2">
                         <h3 class="font-bold">📊 Laporan Laba</h3>
-                        <button onclick="loadLaporan()" class="bg-gray-200 text-gray-700 px-2 py-1 rounded text-xs font-semibold hover:bg-gray-300">🔄 Perbarui</button>
+                        <div class="flex gap-1.5">
+                            <button onclick="loadLaporan()" class="bg-gray-200 text-gray-700 px-2 py-1 rounded text-xs font-semibold hover:bg-gray-300">🔄 Perbarui</button>
+                            <button id="btnResetLaporan" onclick="resetLaporan()" class="bg-red-500 text-white px-2 py-1 rounded text-xs font-semibold hover:bg-red-600">🗑️ Reset Semua</button>
+                        </div>
                     </div>
                     <label class="text-xs text-gray-500">Pilih tanggal:</label>
                     <input type="date" id="laporanTanggal" class="w-full border p-2 rounded mb-3" onchange="renderLaporan()">
@@ -777,7 +784,6 @@
             btn.disabled = true;
             btn.textContent = 'Menyimpan...';
 
-            // Snapshot item: harga jual + harga beli saat transaksi (untuk laporan laba)
             const items = keranjang.map(i => ({
                 barcode: i.barcode, nama: i.nama,
                 harga: i.harga, hargaBeli: Number(i.hargaBeli) || 0, qty: i.qty
@@ -991,7 +997,6 @@
                 batch.set(window.fs.doc(window.db, 'pembelian', pembelian.id), pembelian);
                 const status = await tulisDenganStatus(batch.commit());
 
-                // update lokal
                 if (b.stok === null || b.stok === undefined) b.stok = qty;
                 else b.stok += qty;
                 cachePembelianAll.push(pembelian);
@@ -1211,7 +1216,6 @@
         let cacheTransaksiAll = [];
         let cachePembelianAll = [];
 
-        // Modal & laba satu transaksi (kompatibel transaksi lama yang belum punya hargaBeli)
         function labaTrx(t) {
             const modal = (t.totalModal !== undefined && t.totalModal !== null)
                 ? t.totalModal
@@ -1340,6 +1344,125 @@
                     </div>
                     ${cachePembelianAll.length ? `<div class="text-xs text-gray-500">📥 Total belanja stok: <b>${formatRupiah(belanjaTotal)}</b> (${cachePembelianAll.length} pembelian) — uang keluar untuk stok yang belum tentu terjual semua.</div>` : ''}
                 </div>`;
+        }
+
+        // ================== BACKUP & RESET DATA ==================
+        async function hitungJumlah(koleksi) {
+            const snap = await window.fs.getDocs(window.fs.collection(window.db, koleksi));
+            return snap.size;
+        }
+
+        // Hapus seluruh isi koleksi secara bertahap (maks 400 dokumen per batch)
+        async function hapusSemuaDiKoleksi(koleksi, onProgres) {
+            let total = 0;
+            while (true) {
+                const q = window.fs.query(window.fs.collection(window.db, koleksi), window.fs.limit(400));
+                const snap = await window.fs.getDocs(q);
+                if (snap.empty) break;
+                const batch = window.fs.writeBatch(window.db);
+                snap.forEach(d => batch.delete(d.ref));
+                await tulisDenganStatus(batch.commit());
+                total += snap.size;
+                if (onProgres) onProgres(total);
+            }
+            return total;
+        }
+
+        // 💾 Unduh salinan semua data (JSON) — disarankan sebelum reset!
+        async function backupData() {
+            if (!window.fs) return toast('Database belum siap.', 'warn');
+            try {
+                toast('Menyiapkan backup...', 'warn');
+                const [b, t, p] = await Promise.all([
+                    window.fs.getDocs(window.fs.collection(window.db, 'barang')),
+                    window.fs.getDocs(window.fs.collection(window.db, 'transaksi')),
+                    window.fs.getDocs(window.fs.collection(window.db, 'pembelian')).catch(() => null)
+                ]);
+                const data = { diekspor: new Date().toISOString(), barang: [], transaksi: [], pembelian: [] };
+                b.forEach(d => data.barang.push({ id: d.id, ...d.data() }));
+                t.forEach(d => data.transaksi.push(d.data()));
+                if (p) p.forEach(d => data.pembelian.push(d.data()));
+
+                const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+                const a = document.createElement('a');
+                a.href = URL.createObjectURL(blob);
+                a.download = `backup-wowor-jaya-${toLocalDateStr(new Date())}.json`;
+                document.body.appendChild(a);
+                a.click();
+                a.remove();
+                URL.revokeObjectURL(a.href);
+                toast(`Backup diunduh (${data.barang.length} barang, ${data.transaksi.length} transaksi). Simpan filenya!`);
+            } catch (e) {
+                toast('Gagal backup: ' + e.message, 'error');
+            }
+        }
+
+        // 🗑️ Reset semua riwayat transaksi (tab Riwayat)
+        async function resetRiwayat() {
+            if (!window.fs) return toast('Database belum siap.', 'warn');
+            const btn = document.getElementById('btnResetRiwayat');
+            if (btn.disabled) return;
+
+            let jumlah = 0;
+            try { jumlah = await hitungJumlah('transaksi'); }
+            catch (e) { return toast('Gagal membaca data: ' + e.message, 'error'); }
+            if (jumlah === 0) return toast('Riwayat transaksi sudah kosong.', 'warn');
+
+            if (!confirm(`⚠️ HAPUS SEMUA RIWAYAT TRANSAKSI?\n\nJumlah transaksi: ${jumlah}\n\n• Semua riwayat penjualan hilang PERMANEN\n• Laporan laba (harian & keseluruhan) ikut terhapus\n• Data barang, harga & stok TIDAK terhapus\n\nTips: tekan 💾 Backup dulu bila perlu salinan.\n\nLanjutkan?`)) return;
+            if (!confirm('KONFIRMASI TERAKHIR!\nYakin hapus SEMUA riwayat transaksi?')) return;
+
+            btn.disabled = true;
+            const teksAsli = btn.textContent;
+            try {
+                const total = await hapusSemuaDiKoleksi('transaksi', n => { btn.textContent = `⏳ ${n}...`; });
+                cacheTransaksi = [];
+                cacheTransaksiAll = [];
+                toast(`✅ ${total} transaksi dihapus. Riwayat & laporan dikosongkan.`);
+                loadTransaksi();
+                if (laporanDimuat) renderLaporan();
+            } catch (e) {
+                toast('Gagal menghapus: ' + e.message, 'error');
+            } finally {
+                btn.disabled = false;
+                btn.textContent = teksAsli;
+            }
+        }
+
+        // 🗑️ Reset semua data laporan: transaksi + pembelian (tab Laporan)
+        async function resetLaporan() {
+            if (!window.fs) return toast('Database belum siap.', 'warn');
+            const btn = document.getElementById('btnResetLaporan');
+            if (btn.disabled) return;
+
+            let jumlahT = 0, jumlahP = 0;
+            try {
+                jumlahT = await hitungJumlah('transaksi');
+                jumlahP = await hitungJumlah('pembelian').catch(() => 0);
+            } catch (e) { return toast('Gagal membaca data: ' + e.message, 'error'); }
+            if (jumlahT === 0 && jumlahP === 0) return toast('Data laporan sudah kosong.', 'warn');
+
+            if (!confirm(`⚠️ RESET SEMUA DATA LAPORAN?\n\n• Transaksi: ${jumlahT} data akan DIHAPUS\n• Pembelian stok: ${jumlahP} data akan DIHAPUS\n\nSemua omzet, modal & laba (harian + keseluruhan) jadi nol.\nData barang, harga & stok TIDAK berubah.\n\nTips: tekan 💾 Backup dulu bila perlu salinan.\n\nLanjutkan?`)) return;
+            if (!confirm('KONFIRMASI TERAKHIR!\nYakin reset SEMUA data laporan?')) return;
+
+            btn.disabled = true;
+            const teksAsli = btn.textContent;
+            try {
+                const t = await hapusSemuaDiKoleksi('transaksi', n => { btn.textContent = `⏳ ${n}...`; });
+                const p = await hapusSemuaDiKoleksi('pembelian', n => { btn.textContent = `⏳ +${n}...`; });
+                cacheTransaksi = [];
+                cacheTransaksiAll = [];
+                cachePembelianAll = [];
+                toast(`✅ Reset selesai: ${t} transaksi + ${p} pembelian dihapus.`);
+                if (laporanDimuat) renderLaporan();
+                const listT = document.getElementById('listTransaksi');
+                if (!document.getElementById('tabTransaksi').classList.contains('hidden')) loadTransaksi();
+                else listT.innerHTML = '<p class="text-center text-gray-400 py-3">Belum ada transaksi.</p>';
+            } catch (e) {
+                toast('Gagal reset: ' + e.message, 'error');
+            } finally {
+                btn.disabled = false;
+                btn.textContent = teksAsli;
+            }
         }
 
         // ================== EVENT LISTENER ==================
